@@ -699,7 +699,7 @@ export class LokiService {
 
       // Build query to get log entries for field detection
       let sql = `
-        SELECT Body, SeverityText, ResourceAttributes, LogAttributes
+        SELECT ResourceAttributes, LogAttributes
         FROM ${this.translator['logsTable']}
         WHERE Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
       `;
@@ -727,13 +727,11 @@ export class LokiService {
       sql += ' ORDER BY Timestamp DESC LIMIT 1000';
 
       const results = await this.clickhouse.query<{
-        Body: string;
-        SeverityText: string;
-        ResourceAttributes: Record<string, string>;
-        LogAttributes: Record<string, string>;
+        ResourceAttributes: Record<string, any>;
+        LogAttributes: Record<string, any>;
       }>(sql, params);
 
-      // Process log entries to detect fields
+      // Aggregate all unique keys and their values
       const detectedFields = new Map<string, {
         type: 'string' | 'int' | 'float' | 'boolean' | 'duration' | 'bytes';
         cardinality: Set<string>;
@@ -741,22 +739,51 @@ export class LokiService {
         jsonPath?: string[];
       }>();
 
-      // Add structured metadata fields
-      detectedFields.set('detected_level', {
-        type: 'string',
-        cardinality: new Set(),
-        parsers: new Set(),
-      });
-
       for (const entry of results) {
-        // Add detected_level from severity
-        if (entry.SeverityText) {
-          const level = this.mapSeverityToLevel(entry.SeverityText);
-          detectedFields.get('detected_level')!.cardinality.add(level);
+        // ResourceAttributes
+        if (entry.ResourceAttributes && typeof entry.ResourceAttributes === 'object') {
+          for (const [key, value] of Object.entries(entry.ResourceAttributes)) {
+            if (!detectedFields.has(key)) {
+              detectedFields.set(key, {
+                type: 'string',
+                cardinality: new Set(),
+                parsers: new Set(['structuredMetadata']),
+                jsonPath: [key],
+              });
+            }
+            const field = detectedFields.get(key)!;
+            if (value !== null && value !== undefined) {
+              field.cardinality.add(String(value));
+              // Update type
+              const detectedType = this.determineFieldType(String(value));
+              if (this.getTypePriority(detectedType) > this.getTypePriority(field.type)) {
+                field.type = detectedType;
+              }
+            }
+          }
         }
-
-        // Parse log body for fields
-        this.parseLogBodyForFields(entry.Body, detectedFields);
+        // LogAttributes
+        if (entry.LogAttributes && typeof entry.LogAttributes === 'object') {
+          for (const [key, value] of Object.entries(entry.LogAttributes)) {
+            if (!detectedFields.has(key)) {
+              detectedFields.set(key, {
+                type: 'string',
+                cardinality: new Set(),
+                parsers: new Set(['structuredMetadata']),
+                jsonPath: [key],
+              });
+            }
+            const field = detectedFields.get(key)!;
+            if (value !== null && value !== undefined) {
+              field.cardinality.add(String(value));
+              // Update type
+              const detectedType = this.determineFieldType(String(value));
+              if (this.getTypePriority(detectedType) > this.getTypePriority(field.type)) {
+                field.type = detectedType;
+              }
+            }
+          }
+        }
       }
 
       // Convert to response format
@@ -769,6 +796,10 @@ export class LokiService {
       }> = [];
 
       for (const [label, field] of detectedFields) {
+        // Skip fields that logs-drilldown filters out, and also span_id and trace_id
+        if (["detected_level", "level", "level_extracted", "span_id", "trace_id"].includes(label)) {
+          continue;
+        }
         fields.push({
           label,
           type: field.type,
