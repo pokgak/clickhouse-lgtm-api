@@ -9,6 +9,7 @@ import {
   LokiIndexStatsResponse,
   LokiIndexVolumeResponse,
   LokiIndexVolumeRangeResponse,
+  LokiPatternsResponse,
   LokiStream,
   LogEntry
 } from './types';
@@ -147,9 +148,21 @@ export class LokiService {
       console.log('Executing label values query:', sql, 'with params:', params);
       const results = await this.clickhouse.query<{ value: string }>(sql, params);
 
+      let values = results.map(r => r.value).filter(v => v);
+
+      // Apply level mapping for severity/level labels to return Grafana-compatible values
+      if (labelName === 'severity' || labelName === 'level') {
+        // Get unique mapped values
+        const mappedValues = new Set<string>();
+        values.forEach(value => {
+          mappedValues.add(this.mapSeverityToLevel(value));
+        });
+        values = Array.from(mappedValues).sort();
+      }
+
       return {
         status: 'success',
-        data: results.map(r => r.value).filter(v => v)
+        data: values
       };
     } catch (error) {
       console.error('ClickHouse label values query error:', error);
@@ -177,6 +190,11 @@ export class LokiService {
           service_name: r.ServiceName,
           severity: r.SeverityText
         };
+
+        // Add 'level' label for Grafana coloring (mapped to expected values)
+        if (r.SeverityText) {
+          labels.level = this.mapSeverityToLevel(r.SeverityText);
+        }
 
         // Parse JSON attributes safely
         try {
@@ -309,6 +327,230 @@ export class LokiService {
     return Array.from(streamMap.values());
   }
 
+    async getPatterns(query: string, start: string, end: string, step?: string): Promise<LokiPatternsResponse> {
+    try {
+      // Parse timestamps
+      const startTimestamp = this.parseTimestamp(start);
+      const endTimestamp = this.parseTimestamp(end);
+      const stepSeconds = step ? this.parseStep(step) : 60; // Default to 1 minute
+
+      // Build SQL to analyze log patterns - get all log lines first
+      let sql = `
+        SELECT
+          Timestamp,
+          Body as log_line
+        FROM ${this.translator['logsTable']}
+        WHERE Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+      `;
+
+      const params: Record<string, any> = {
+        start: startTimestamp,
+        end: endTimestamp
+      };
+
+      // Add query filters
+      if (query && query !== '{}') {
+        const logqlQuery = {
+          query,
+          start: startTimestamp,
+          end: endTimestamp
+        };
+        const { sql: filterSql, params: filterParams } = this.translator.translateQuery(logqlQuery);
+        const whereMatch = filterSql.match(/WHERE\s+(.+?)\s+ORDER/s);
+        if (whereMatch) {
+          sql += ' AND ' + whereMatch[1];
+          Object.assign(params, filterParams);
+        }
+      }
+
+      sql += ` ORDER BY Timestamp DESC LIMIT 10000`;
+
+      const results = await this.clickhouse.query<{
+        Timestamp: string;
+        log_line: string;
+      }>(sql, params);
+
+      // Group patterns across all timestamps
+      const patternMap = new Map<string, Map<number, number>>();
+
+      for (const result of results) {
+        // Convert timestamp to Unix timestamp (seconds) and bucket it
+        const timestampNs = this.parseClickHouseTimestamp(result.Timestamp);
+        const timestampSeconds = Math.floor(timestampNs / 1000000000); // Convert nanoseconds to seconds
+        const bucketedTimestamp = Math.floor(timestampSeconds / stepSeconds) * stepSeconds;
+
+        // Extract pattern using Loki's format
+        const pattern = this.extractLokiPattern(result.log_line);
+
+        if (!patternMap.has(pattern)) {
+          patternMap.set(pattern, new Map());
+        }
+
+        const patternSamples = patternMap.get(pattern)!;
+        patternSamples.set(bucketedTimestamp, (patternSamples.get(bucketedTimestamp) || 0) + 1);
+      }
+
+      // Convert to response format
+      const patterns = Array.from(patternMap.entries()).map(([pattern, samples]) => ({
+        pattern,
+        samples: Array.from(samples.entries())
+          .sort(([a], [b]) => a - b) // Sort by timestamp
+          .map(([timestamp, count]) => [timestamp, count] as [number, number])
+      }));
+
+      // Sort patterns by total frequency (descending)
+      patterns.sort((a, b) => {
+        const aTotal = a.samples.reduce((sum, [, count]) => sum + count, 0);
+        const bTotal = b.samples.reduce((sum, [, count]) => sum + count, 0);
+        return bTotal - aTotal;
+      });
+
+      return {
+        status: 'success',
+        data: patterns
+      };
+    } catch (error) {
+      console.error('ClickHouse patterns error:', error);
+      return {
+        status: 'error',
+        data: [],
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  private extractLokiPattern(logLine: string): string {
+    // Extract pattern using Loki's format with <_> placeholders
+    let pattern = logLine
+      // Replace timestamps (ISO format)
+      .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?/g, '<_>')
+      // Replace Unix timestamps
+      .replace(/\b\d{10,13}\b/g, '<_>')
+      // Replace UUIDs
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<_>')
+      // Replace numbers (but keep small numbers like status codes)
+      .replace(/\b\d{4,}\b/g, '<_>')
+      // Replace IP addresses
+      .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, '<_>')
+      // Replace email addresses
+      .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, '<_>')
+      // Replace URLs
+      .replace(/https?:\/\/[^\s]+/g, '<_>')
+      // Replace file paths
+      .replace(/\/[^\s]*\.[a-zA-Z]{2,4}/g, '<_>')
+      // Replace request IDs
+      .replace(/\b[0-9a-f]{16,}\b/gi, '<_>')
+      // Replace durations (e.g., "200ms", "500ms")
+      .replace(/\b\d+[a-z]+\b/g, '<_>')
+      // Replace common variable parts in log messages
+      .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b/g, '<_>') // IP:port
+      .replace(/\b[A-Za-z0-9._-]+@[A-Za-z0-9._-]+\b/g, '<_>') // Simple email-like patterns
+      .replace(/\b[A-Za-z0-9._-]+\.[A-Za-z]{2,}\b/g, '<_>'); // Domain names
+
+    return pattern;
+  }
+
+  async getDetectedFields(query?: string, start?: string, end?: string): Promise<LokiLabelsResponse> {
+    try {
+      // Parse timestamps
+      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
+      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
+
+      // For detected_fields, we'll return common fields that can be extracted from log bodies
+      // This is a simplified implementation - in a real scenario, you might want to analyze log content
+      const commonFields = [
+        'timestamp',
+        'level',
+        'message',
+        'method',
+        'path',
+        'status_code',
+        'duration',
+        'user_id',
+        'request_id',
+        'ip',
+        'user_agent',
+        'error',
+        'stack_trace'
+      ];
+
+      return {
+        status: 'success',
+        data: commonFields
+      };
+    } catch (error) {
+      console.error('ClickHouse detected fields error:', error);
+      return {
+        status: 'error',
+        data: [],
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  async getDetectedLabels(query?: string, start?: string, end?: string): Promise<LokiLabelsResponse> {
+    try {
+      // Parse timestamps
+      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
+      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
+
+      let sql = `
+        SELECT DISTINCT label_name
+        FROM (
+          SELECT 'service_name' as label_name FROM ${this.translator['logsTable']} WHERE ServiceName != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+          UNION ALL
+          SELECT 'severity' as label_name FROM ${this.translator['logsTable']} WHERE SeverityText != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+          UNION ALL
+          SELECT 'trace_id' as label_name FROM ${this.translator['logsTable']} WHERE TraceId != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+          UNION ALL
+          SELECT 'span_id' as label_name FROM ${this.translator['logsTable']} WHERE SpanId != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+          UNION ALL
+          SELECT 'scope_name' as label_name FROM ${this.translator['logsTable']} WHERE ScopeName != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+          UNION ALL
+          SELECT 'scope_version' as label_name FROM ${this.translator['logsTable']} WHERE ScopeVersion != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+          UNION ALL
+          SELECT 'level' as label_name FROM ${this.translator['logsTable']} WHERE SeverityText != '' AND Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
+        )
+        ORDER BY label_name
+      `;
+
+      const params: Record<string, any> = {
+        start: startTimestamp,
+        end: endTimestamp
+      };
+
+      // Add query filters if provided
+      if (query && query !== '{}') {
+        const logqlQuery = {
+          query,
+          start: startTimestamp,
+          end: endTimestamp
+        };
+        const { sql: filterSql, params: filterParams } = this.translator.translateQuery(logqlQuery);
+        const whereMatch = filterSql.match(/WHERE\s+(.+?)\s+ORDER/s);
+        if (whereMatch) {
+          // Replace the WHERE clause in each UNION subquery
+          sql = sql.replace(/WHERE (.+?) AND Timestamp/g, `WHERE ${whereMatch[1]} AND Timestamp`);
+          Object.assign(params, filterParams);
+        }
+      }
+
+      const results = await this.clickhouse.query<{ label_name: string }>(sql, params);
+
+      return {
+        status: 'success',
+        data: results.map(r => r.label_name)
+      };
+    } catch (error) {
+      console.error('ClickHouse detected labels error:', error);
+      return {
+        status: 'error',
+        data: [],
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
   async getIndexStats(query?: string, start?: string, end?: string): Promise<LokiIndexStatsResponse> {
     try {
       // Build a basic stats query
@@ -381,141 +623,264 @@ export class LokiService {
     }
   }
 
-  async getIndexVolume(query?: string, start?: string, end?: string, limit?: number): Promise<LokiIndexVolumeResponse> {
+  async getIndexVolume(query: string, start: string, end: string, limit: number = 100, targetLabels?: string, aggregateBy: string = 'series'): Promise<LokiIndexVolumeResponse> {
     try {
+      // Parse timestamps
+      const startTimestamp = this.parseTimestamp(start);
+      const endTimestamp = this.parseTimestamp(end);
+
+      // Determine which labels to group by based on targetLabels and aggregateBy
+      let groupByLabels: string[] = [];
+
+      if (aggregateBy === 'labels') {
+        // For labels aggregation, we need to extract label names from the query
+        const labelMatches = query.match(/(\w+)=/g);
+        if (labelMatches) {
+          groupByLabels = labelMatches.map(match => match.replace('=', ''));
+        }
+      } else {
+        // For series aggregation (default), use targetLabels or extract from query
+        if (targetLabels) {
+          groupByLabels = targetLabels.split(',').map(label => label.trim());
+        } else {
+          // Extract labels from the query
+          const labelMatches = query.match(/(\w+)=/g);
+          if (labelMatches) {
+            groupByLabels = labelMatches.map(match => match.replace('=', ''));
+          }
+        }
+      }
+
+      // Build dynamic SQL based on available labels
+      let selectClause = 'COUNT(*) as volume';
+      let groupByClause = '';
+
+      if (groupByLabels.length > 0) {
+        const labelSelects = groupByLabels.map(label => {
+          // Map common label names to our schema
+          switch (label.toLowerCase()) {
+            case 'service_name':
+            case 'service':
+              return 'ServiceName as service_name';
+            case 'severity':
+            case 'level':
+              return 'SeverityText as severity';
+            default:
+              // For other labels, try to extract from LogAttributes
+              return `LogAttributes['${label}'] as ${label}`;
+          }
+        });
+        selectClause = labelSelects.join(', ') + ', ' + selectClause;
+        groupByClause = 'GROUP BY ' + groupByLabels.map(label => {
+          switch (label.toLowerCase()) {
+            case 'service_name':
+            case 'service':
+              return 'ServiceName';
+            case 'severity':
+            case 'level':
+              return 'SeverityText';
+            default:
+              return `LogAttributes['${label}']`;
+          }
+        }).join(', ');
+      }
+
       let sql = `
-        SELECT
-          ServiceName as name,
-          COUNT(*) as volume
+        SELECT ${selectClause}
         FROM ${this.translator['logsTable']}
+        WHERE Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
       `;
 
-      const conditions: string[] = [];
-      const params: Record<string, any> = {};
+      const params: Record<string, any> = {
+        start: startTimestamp,
+        end: endTimestamp
+      };
 
-      if (start) {
-        conditions.push('Timestamp >= {start:DateTime64}');
-        params.start = this.parseTimestamp(start);
-      }
-
-      if (end) {
-        conditions.push('Timestamp <= {end:DateTime64}');
-        params.end = this.parseTimestamp(end);
-      }
-
+      // Add query filters
       if (query && query !== '{}') {
         const logqlQuery = {
           query,
-          start: start ? this.parseTimestamp(start) : undefined,
-          end: end ? this.parseTimestamp(end) : undefined
+          start: startTimestamp,
+          end: endTimestamp
         };
         const { sql: filterSql, params: filterParams } = this.translator.translateQuery(logqlQuery);
         const whereMatch = filterSql.match(/WHERE\s+(.+?)\s+ORDER/s);
         if (whereMatch) {
-          conditions.push(whereMatch[1]);
+          sql += ' AND ' + whereMatch[1];
           Object.assign(params, filterParams);
         }
       }
 
-      if (conditions.length > 0) {
-        sql += ' WHERE ' + conditions.join(' AND ');
+      if (groupByClause) {
+        sql += ` ${groupByClause}`;
       }
 
-      sql += ' GROUP BY ServiceName ORDER BY volume DESC';
+      sql += ` ORDER BY volume DESC LIMIT ${limit}`;
 
-      if (limit) {
-        sql += ` LIMIT ${limit}`;
-      }
+      const results = await this.clickhouse.query<any>(sql, params);
 
-      const results = await this.clickhouse.query<{
-        name: string;
-        volume: number;
-      }>(sql, params);
+      // Convert to Prometheus vector format
+      const vectorResult = results.map(row => {
+        const metric: Record<string, string> = {};
+
+        // Add all non-volume fields as metric labels
+        Object.keys(row).forEach(key => {
+          if (key !== 'volume' && row[key] !== null && row[key] !== undefined) {
+            // Apply level mapping for severity/level labels
+            if (key === 'severity' || key === 'level') {
+              metric[key] = this.mapSeverityToLevel(row[key].toString());
+            } else {
+              metric[key] = row[key].toString();
+            }
+          }
+        });
+
+        return {
+          metric,
+          value: [Math.floor(Date.now() / 1000), row.volume.toString()] as [number, string]
+        };
+      });
 
       return {
         status: 'success',
         data: {
-          volumes: results
+          resultType: 'vector',
+          result: vectorResult
         }
       };
     } catch (error) {
       console.error('ClickHouse index volume error:', error);
       return {
         status: 'error',
-        data: { volumes: [] },
+        data: { resultType: 'vector', result: [] },
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
 
-  async getIndexVolumeRange(query?: string, start?: string, end?: string, step?: string): Promise<LokiIndexVolumeRangeResponse> {
+  async getIndexVolumeRange(query: string, start: string, end: string, step?: string, targetLabels?: string, aggregateBy: string = 'series'): Promise<LokiIndexVolumeRangeResponse> {
     try {
       // Parse step (default to 1 hour if not provided)
       const stepSeconds = step ? this.parseStep(step) : 3600;
 
-      // Parse timestamps properly for ClickHouse
-      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
-      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
+      // Parse timestamps
+      const startTimestamp = this.parseTimestamp(start);
+      const endTimestamp = this.parseTimestamp(end);
+
+      // Determine which labels to group by based on targetLabels and aggregateBy
+      let groupByLabels: string[] = [];
+
+      if (aggregateBy === 'labels') {
+        // For labels aggregation, we need to extract label names from the query
+        const labelMatches = query.match(/(\w+)=/g);
+        if (labelMatches) {
+          groupByLabels = labelMatches.map(match => match.replace('=', ''));
+        }
+      } else {
+        // For series aggregation (default), use targetLabels or extract from query
+        if (targetLabels) {
+          groupByLabels = targetLabels.split(',').map(label => label.trim());
+        } else {
+          // Extract labels from the query
+          const labelMatches = query.match(/(\w+)=/g);
+          if (labelMatches) {
+            groupByLabels = labelMatches.map(match => match.replace('=', ''));
+          }
+        }
+      }
+
+      // Build dynamic SQL based on available labels
+      let selectClause = `toUnixTimestamp(toStartOfInterval(Timestamp, INTERVAL ${stepSeconds} SECOND)) as timestamp, COUNT(*) as volume`;
+      let groupByClause = 'timestamp';
+
+      if (groupByLabels.length > 0) {
+        const labelSelects = groupByLabels.map(label => {
+          // Map common label names to our schema
+          switch (label.toLowerCase()) {
+            case 'service_name':
+            case 'service':
+              return 'ServiceName as service_name';
+            case 'severity':
+            case 'level':
+              return 'SeverityText as severity';
+            default:
+              // For other labels, try to extract from LogAttributes
+              return `LogAttributes['${label}'] as ${label}`;
+          }
+        });
+        selectClause = `toUnixTimestamp(toStartOfInterval(Timestamp, INTERVAL ${stepSeconds} SECOND)) as timestamp, ` + labelSelects.join(', ') + ', COUNT(*) as volume';
+        groupByClause = 'timestamp, ' + groupByLabels.map(label => {
+          switch (label.toLowerCase()) {
+            case 'service_name':
+            case 'service':
+              return 'ServiceName';
+            case 'severity':
+            case 'level':
+              return 'SeverityText';
+            default:
+              return `LogAttributes['${label}']`;
+          }
+        }).join(', ');
+      }
 
       let sql = `
-        SELECT
-          toUnixTimestamp(toStartOfInterval(Timestamp, INTERVAL ${stepSeconds} SECOND)) as timestamp,
-          CASE
-            WHEN lower(SeverityText) LIKE '%fatal%' OR lower(SeverityText) LIKE '%critical%' OR lower(SeverityText) LIKE '%emerg%' OR lower(SeverityText) LIKE '%alert%' OR lower(SeverityText) LIKE '%crit%' THEN 'critical'
-            WHEN lower(SeverityText) LIKE '%error%' OR lower(SeverityText) LIKE '%err%' THEN 'error'
-            WHEN lower(SeverityText) LIKE '%warn%' THEN 'warning'
-            WHEN lower(SeverityText) LIKE '%info%' OR lower(SeverityText) LIKE '%information%' OR lower(SeverityText) LIKE '%informational%' OR lower(SeverityText) LIKE '%notice%' THEN 'info'
-            WHEN lower(SeverityText) LIKE '%debug%' OR lower(SeverityText) LIKE '%dbug%' THEN 'debug'
-            WHEN lower(SeverityText) LIKE '%trace%' THEN 'trace'
-            ELSE 'unknown'
-          END as level,
-          COUNT(*) as volume
+        SELECT ${selectClause}
         FROM ${this.translator['logsTable']}
+        WHERE Timestamp >= {start:DateTime64} AND Timestamp <= {end:DateTime64}
       `;
 
-      const conditions: string[] = [];
-      const params: Record<string, any> = {};
+      const params: Record<string, any> = {
+        start: startTimestamp,
+        end: endTimestamp
+      };
 
-      conditions.push('Timestamp >= {start:DateTime64}');
-      conditions.push('Timestamp <= {end:DateTime64}');
-      params.start = startTimestamp;
-      params.end = endTimestamp;
-
+      // Add query filters
       if (query && query !== '{}') {
         const logqlQuery = {
           query,
-          start: start ? this.parseTimestamp(start) : undefined,
-          end: end ? this.parseTimestamp(end) : undefined
+          start: startTimestamp,
+          end: endTimestamp
         };
         const { sql: filterSql, params: filterParams } = this.translator.translateQuery(logqlQuery);
         const whereMatch = filterSql.match(/WHERE\s+(.+?)\s+ORDER/s);
         if (whereMatch) {
-          conditions.push(whereMatch[1]);
+          sql += ' AND ' + whereMatch[1];
           Object.assign(params, filterParams);
         }
       }
 
-      sql += ' WHERE ' + conditions.join(' AND ');
-      sql += ' GROUP BY level, timestamp ORDER BY level, timestamp';
+      sql += ` GROUP BY ${groupByClause} ORDER BY timestamp`;
 
-      const results = await this.clickhouse.query<{
-        level: string;
-        timestamp: number;
-        volume: number;
-      }>(sql, params);
+      const results = await this.clickhouse.query<any>(sql, params);
 
-      // Group by level for colored bars
-      const levelMap = new Map<string, Array<[number, string]>>();
+      // Group by metric labels for matrix format
+      const metricMap = new Map<string, Array<[number, string]>>();
 
       for (const result of results) {
-        if (!levelMap.has(result.level)) {
-          levelMap.set(result.level, []);
+        const metric: Record<string, string> = {};
+
+        // Add all non-timestamp and non-volume fields as metric labels
+        Object.keys(result).forEach(key => {
+          if (key !== 'timestamp' && key !== 'volume' && result[key] !== null && result[key] !== undefined) {
+            // Apply level mapping for severity/level labels
+            if (key === 'severity' || key === 'level') {
+              metric[key] = this.mapSeverityToLevel(result[key].toString());
+            } else {
+              metric[key] = result[key].toString();
+            }
+          }
+        });
+
+        const metricKey = JSON.stringify(metric);
+        if (!metricMap.has(metricKey)) {
+          metricMap.set(metricKey, []);
         }
-        levelMap.get(result.level)!.push([result.timestamp, result.volume.toString()]);
+
+        metricMap.get(metricKey)!.push([result.timestamp, result.volume.toString()]);
       }
 
-      const matrixResult = Array.from(levelMap.entries()).map(([level, values]) => ({
-        metric: { level: level },
+      const matrixResult = Array.from(metricMap.entries()).map(([metricKey, values]) => ({
+        metric: JSON.parse(metricKey),
         values
       }));
 
