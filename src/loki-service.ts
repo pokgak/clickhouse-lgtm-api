@@ -80,8 +80,15 @@ export class LokiService {
           step = `${value}${unit}`;
         }
 
-        console.log('Detected aggregation query, using getIndexVolumeRange with step:', step);
-        return await this.getIndexVolumeRange(query, start, end, step);
+        // Extract target labels from sum by (label1, label2) syntax
+        let targetLabels: string | undefined;
+        const sumByMatch = query.match(/sum\s+by\s*\(([^)]+)\)/i);
+        if (sumByMatch) {
+          targetLabels = sumByMatch[1].split(',').map(label => label.trim()).join(',');
+        }
+
+        console.log('Detected aggregation query, using getIndexVolumeRange with step:', step, 'targetLabels:', targetLabels);
+        return await this.getIndexVolumeRange(query, start, end, step, targetLabels);
       }
 
       const logqlQuery = {
