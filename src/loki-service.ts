@@ -726,17 +726,29 @@ export class LokiService {
       const vectorResult = results.map(row => {
         const metric: Record<string, string> = {};
 
-        // Add all non-volume fields as metric labels
-        Object.keys(row).forEach(key => {
-          if (key !== 'volume' && row[key] !== null && row[key] !== undefined) {
-            // Apply level mapping for severity/level labels
-            if (key === 'severity' || key === 'level') {
-              metric[key] = this.mapSeverityToLevel(row[key].toString());
-            } else {
-              metric[key] = row[key].toString();
+        if (targetLabels) {
+          // Only include targetLabels in the metric
+          targetLabels.split(',').map(label => label.trim()).forEach(label => {
+            if (row[label] !== null && row[label] !== undefined) {
+              if (label === 'severity' || label === 'level') {
+                metric[label] = this.mapSeverityToLevel(row[label].toString());
+              } else {
+                metric[label] = row[label].toString();
+              }
             }
-          }
-        });
+          });
+        } else {
+          // Add all non-volume fields as metric labels
+          Object.keys(row).forEach(key => {
+            if (key !== 'volume' && row[key] !== null && row[key] !== undefined) {
+              if (key === 'severity' || key === 'level') {
+                metric[key] = this.mapSeverityToLevel(row[key].toString());
+              } else {
+                metric[key] = row[key].toString();
+              }
+            }
+          });
+        }
 
         return {
           metric,
@@ -858,17 +870,29 @@ export class LokiService {
       for (const result of results) {
         const metric: Record<string, string> = {};
 
-        // Add all non-timestamp and non-volume fields as metric labels
-        Object.keys(result).forEach(key => {
-          if (key !== 'timestamp' && key !== 'volume' && result[key] !== null && result[key] !== undefined) {
-            // Apply level mapping for severity/level labels
-            if (key === 'severity' || key === 'level') {
-              metric[key] = this.mapSeverityToLevel(result[key].toString());
-            } else {
-              metric[key] = result[key].toString();
+        if (targetLabels) {
+          // Only include targetLabels in the metric
+          targetLabels.split(',').map(label => label.trim()).forEach(label => {
+            if (result[label] !== null && result[label] !== undefined) {
+              if (label === 'severity' || label === 'level') {
+                metric[label] = this.mapSeverityToLevel(result[label].toString());
+              } else {
+                metric[label] = result[label].toString();
+              }
             }
-          }
-        });
+          });
+        } else {
+          // Add all non-timestamp and non-volume fields as metric labels
+          Object.keys(result).forEach(key => {
+            if (key !== 'timestamp' && key !== 'volume' && result[key] !== null && result[key] !== undefined) {
+              if (key === 'severity' || key === 'level') {
+                metric[key] = this.mapSeverityToLevel(result[key].toString());
+              } else {
+                metric[key] = result[key].toString();
+              }
+            }
+          });
+        }
 
         const metricKey = JSON.stringify(metric);
         if (!metricMap.has(metricKey)) {
