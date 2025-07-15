@@ -20,9 +20,9 @@ export class LogQLTranslator {
 
   translateQuery(logql: LogQLQuery): ClickHouseQuery {
     const { query, start, end, limit = 100, direction = 'backward' } = logql;
-    
+
     let sql = `
-      SELECT 
+      SELECT
         Timestamp,
         TraceId,
         SpanId,
@@ -45,19 +45,19 @@ export class LogQLTranslator {
 
     if (start) {
       conditions.push('Timestamp >= {start:DateTime64}');
-      params.start = new Date(start).toISOString();
+      params.start = this.parseTimestamp(start);
     }
 
     if (end) {
       conditions.push('Timestamp <= {end:DateTime64}');
-      params.end = new Date(end).toISOString();
+      params.end = this.parseTimestamp(end);
     }
 
     const labelFilters = this.parseLogQLLabels(query);
     if (labelFilters.length > 0) {
       labelFilters.forEach((filter, index) => {
         const paramKey = `label_${index}`;
-        
+
         if (filter.key === 'service_name' || filter.key === 'service') {
           if (filter.operator === '=') {
             conditions.push(`ServiceName = {${paramKey}:String}`);
@@ -83,17 +83,17 @@ export class LogQLTranslator {
             params[paramKey] = filter.value;
           }
         } else {
-          // Check in ResourceAttributes and LogAttributes (JSON type)
+          // Check in ResourceAttributes and LogAttributes (Map type)
           if (filter.operator === '=') {
-            conditions.push(`(JSONExtractString(ResourceAttributes, {labelKey_${index}:String}) = {${paramKey}:String} OR JSONExtractString(LogAttributes, {labelKey_${index}:String}) = {${paramKey}:String})`);
+            conditions.push(`(ResourceAttributes[{labelKey_${index}:String}] = {${paramKey}:String} OR LogAttributes[{labelKey_${index}:String}] = {${paramKey}:String})`);
             params[`labelKey_${index}`] = filter.key;
             params[paramKey] = filter.value;
           } else if (filter.operator === '!=') {
-            conditions.push(`(JSONExtractString(ResourceAttributes, {labelKey_${index}:String}) != {${paramKey}:String} AND JSONExtractString(LogAttributes, {labelKey_${index}:String}) != {${paramKey}:String})`);
+            conditions.push(`(ResourceAttributes[{labelKey_${index}:String}] != {${paramKey}:String} AND LogAttributes[{labelKey_${index}:String}] != {${paramKey}:String})`);
             params[`labelKey_${index}`] = filter.key;
             params[paramKey] = filter.value;
           } else if (filter.operator === '=~') {
-            conditions.push(`(match(JSONExtractString(ResourceAttributes, {labelKey_${index}:String}), {${paramKey}:String}) OR match(JSONExtractString(LogAttributes, {labelKey_${index}:String}), {${paramKey}:String}))`);
+            conditions.push(`(match(ResourceAttributes[{labelKey_${index}:String}], {${paramKey}:String}) OR match(LogAttributes[{labelKey_${index}:String}], {${paramKey}:String}))`);
             params[`labelKey_${index}`] = filter.key;
             params[paramKey] = filter.value;
           }
@@ -148,15 +148,26 @@ export class LogQLTranslator {
     return null;
   }
 
+  private parseTimestamp(timestamp: string): string {
+    // Handle nanosecond timestamps from Grafana
+    if (timestamp.length > 13) {
+      // Convert nanoseconds to milliseconds
+      const ms = parseInt(timestamp.substring(0, 13));
+      return new Date(ms).toISOString().replace('Z', '');
+    }
+    // Handle regular timestamps
+    return new Date(timestamp).toISOString().replace('Z', '');
+  }
+
   translateLabelsQuery(): ClickHouseQuery {
     const sql = `
       SELECT DISTINCT label FROM (
         SELECT 'service_name' as label
-        UNION ALL SELECT 'severity'
-        UNION ALL SELECT 'trace_id'
-        UNION ALL SELECT 'span_id'
-        UNION ALL SELECT arrayJoin(JSONExtractKeys(ResourceAttributes))
-        UNION ALL SELECT arrayJoin(JSONExtractKeys(LogAttributes))
+        UNION ALL SELECT 'severity' as label
+        UNION ALL SELECT 'trace_id' as label
+        UNION ALL SELECT 'span_id' as label
+        UNION ALL SELECT arrayJoin(mapKeys(ResourceAttributes)) as label FROM ${this.logsTable}
+        UNION ALL SELECT arrayJoin(mapKeys(LogAttributes)) as label FROM ${this.logsTable}
       )
       WHERE label != ''
       ORDER BY label
@@ -201,13 +212,13 @@ export class LogQLTranslator {
     } else {
       sql = `
         SELECT DISTINCT value FROM (
-          SELECT JSONExtractString(ResourceAttributes, {labelName:String}) as value
+          SELECT ResourceAttributes[{labelName:String}] as value
           FROM ${this.logsTable}
-          WHERE JSONExtractString(ResourceAttributes, {labelName:String}) != ''
+          WHERE ResourceAttributes[{labelName:String}] != ''
           UNION ALL
-          SELECT JSONExtractString(LogAttributes, {labelName:String}) as value
+          SELECT LogAttributes[{labelName:String}] as value
           FROM ${this.logsTable}
-          WHERE JSONExtractString(LogAttributes, {labelName:String}) != ''
+          WHERE LogAttributes[{labelName:String}] != ''
         )
         WHERE value != ''
         ORDER BY value
@@ -226,18 +237,18 @@ export class LogQLTranslator {
         LogAttributes
       FROM ${this.logsTable}
     `;
-    
+
     const conditions: string[] = [];
     const params: Record<string, any> = {};
 
     if (start) {
       conditions.push('Timestamp >= {start:DateTime64}');
-      params.start = new Date(start).toISOString();
+      params.start = this.parseTimestamp(start);
     }
 
     if (end) {
       conditions.push('Timestamp <= {end:DateTime64}');
-      params.end = new Date(end).toISOString();
+      params.end = this.parseTimestamp(end);
     }
 
     if (match && match.length > 0) {
@@ -245,7 +256,7 @@ export class LogQLTranslator {
         const labelFilters = this.parseLogQLLabels(matcher);
         labelFilters.forEach((filter, filterIndex) => {
           const paramKey = `match_${index}_${filterIndex}`;
-          
+
           if (filter.key === 'service_name' || filter.key === 'service') {
             if (filter.operator === '=') {
               conditions.push(`ServiceName = {${paramKey}:String}`);
@@ -258,7 +269,7 @@ export class LogQLTranslator {
             }
           } else {
             if (filter.operator === '=') {
-              conditions.push(`(JSONExtractString(ResourceAttributes, {labelKey_${paramKey}:String}) = {${paramKey}:String} OR JSONExtractString(LogAttributes, {labelKey_${paramKey}:String}) = {${paramKey}:String})`);
+              conditions.push(`(ResourceAttributes[{labelKey_${paramKey}:String}] = {${paramKey}:String} OR LogAttributes[{labelKey_${paramKey}:String}] = {${paramKey}:String})`);
               params[`labelKey_${paramKey}`] = filter.key;
               params[paramKey] = filter.value;
             }

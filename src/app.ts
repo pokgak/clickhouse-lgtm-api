@@ -101,6 +101,44 @@ app.get('/loki/api/v1/series', async (req, res) => {
   res.json(result);
 });
 
+app.get('/loki/api/v1/index/stats', async (req, res) => {
+  const { query, start, end } = req.query;
+  
+  const result = await lokiService.getIndexStats(
+    query as string,
+    start as string,
+    end as string
+  );
+
+  res.json(result);
+});
+
+app.get('/loki/api/v1/index/volume', async (req, res) => {
+  const { query, start, end, limit } = req.query;
+  
+  const result = await lokiService.getIndexVolume(
+    query as string,
+    start as string,
+    end as string,
+    limit ? parseInt(limit as string) : undefined
+  );
+
+  res.json(result);
+});
+
+app.get('/loki/api/v1/index/volume_range', async (req, res) => {
+  const { query, start, end, step } = req.query;
+  
+  const result = await lokiService.getIndexVolumeRange(
+    query as string,
+    start as string,
+    end as string,
+    step as string
+  );
+
+  res.json(result);
+});
+
 // Loki health check endpoints
 app.get('/ready', async (req, res) => {
   const isHealthy = await clickhouse.ping();

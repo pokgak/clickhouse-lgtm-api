@@ -39,8 +39,43 @@ export interface LokiSeriesResponse {
   error?: string;
 }
 
+export interface LokiIndexStatsResponse {
+  status: 'success' | 'error';
+  data: {
+    streams: number;
+    chunks: number;
+    entries: number;
+    bytes: number;
+  };
+  error?: string;
+}
+
+export interface LokiIndexVolumeResponse {
+  status: 'success' | 'error';
+  data: {
+    volumes: Array<{
+      name: string;
+      volume: number;
+    }>;
+  };
+  error?: string;
+}
+
+export interface LokiIndexVolumeRangeResponse {
+  status: 'success' | 'error';
+  data: {
+    resultType: 'matrix';
+    result: Array<{
+      metric: Record<string, string>;
+      values: [number, string][];
+    }>;
+  };
+  error?: string;
+}
+
 export interface LogEntry {
   Timestamp: string;
+  TimestampTime: string;
   TraceId: string;
   SpanId: string;
   TraceFlags: number;
@@ -49,10 +84,10 @@ export interface LogEntry {
   ServiceName: string;
   Body: string;
   ResourceSchemaUrl: string;
-  ResourceAttributes: any; // JSON type
+  ResourceAttributes: Record<string, string>; // Map type
   ScopeSchemaUrl: string;
   ScopeName: string;
   ScopeVersion: string;
-  ScopeAttributes: any; // JSON type
-  LogAttributes: any; // JSON type
+  ScopeAttributes: Record<string, string>; // Map type
+  LogAttributes: Record<string, string>; // Map type
 }
