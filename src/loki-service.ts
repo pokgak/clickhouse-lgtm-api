@@ -1272,13 +1272,13 @@ export class LokiService {
         groupByLabels = targetLabels.split(',').map(label => label.trim());
       } else if (aggregateBy === 'labels') {
         // For labels aggregation, we need to extract label names from the query
-        const labelMatches = query.match(/(\w+)=/g);
+        const labelMatches = query.match(/([\w.]+)=/g);
         if (labelMatches) {
           groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
       } else {
         // Extract labels from the query
-        const labelMatches = query.match(/(\w+)=/g);
+        const labelMatches = query.match(/([\w.]+)=/g);
         if (labelMatches) {
           groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
@@ -1290,17 +1290,18 @@ export class LokiService {
 
       if (groupByLabels.length > 0) {
         const labelSelects = groupByLabels.map(label => {
-          // Map common label names to our schema
+          const safeLabel = label.replace(/\./g, '_');
           switch (label.toLowerCase()) {
             case 'service_name':
             case 'service':
               return 'ServiceName as service_name';
             case 'severity':
             case 'level':
-              return `SeverityText as ${label}`;
+              return `SeverityText as ${safeLabel}`;
             default:
-              // For other labels, try to extract from LogAttributes
-              return `LogAttributes['${label}'] as ${label}`;
+              // For other labels, try to extract from ResourceAttributes and LogAttributes
+              // Handle nested field names like k8s.container.name as single keys
+              return `COALESCE(ResourceAttributes['${label}'], LogAttributes['${label}']) as ${safeLabel}`;
           }
         });
         selectClause = labelSelects.join(', ') + ', ' + selectClause;
@@ -1313,7 +1314,7 @@ export class LokiService {
             case 'level':
               return 'SeverityText';
             default:
-              return `LogAttributes['${label}']`;
+              return `COALESCE(ResourceAttributes['${label}'], LogAttributes['${label}'])`;
           }
         }).join(', ');
       }
@@ -1359,11 +1360,12 @@ export class LokiService {
         if (targetLabels) {
           // Only include targetLabels in the metric
           targetLabels.split(',').map(label => label.trim()).forEach(label => {
-            if (row[label] !== null && row[label] !== undefined) {
+            const safeLabel = label.replace(/\./g, '_');
+            if (row[safeLabel] !== null && row[safeLabel] !== undefined) {
               if (label === 'severity' || label === 'level') {
-                metric[label] = this.mapSeverityToLevel(row[label].toString());
+                metric[label] = this.mapSeverityToLevel(row[safeLabel].toString());
               } else {
-                metric[label] = row[label].toString();
+                metric[label] = row[safeLabel].toString();
               }
             }
           });
@@ -1418,13 +1420,13 @@ export class LokiService {
         groupByLabels = targetLabels.split(',').map(label => label.trim());
       } else if (aggregateBy === 'labels') {
         // For labels aggregation, we need to extract label names from the query
-        const labelMatches = query.match(/(\w+)=/g);
+        const labelMatches = query.match(/([\w.]+)=/g);
         if (labelMatches) {
           groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
       } else {
         // Extract labels from the query
-        const labelMatches = query.match(/(\w+)=/g);
+        const labelMatches = query.match(/([\w.]+)=/g);
         if (labelMatches) {
           groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
@@ -1436,17 +1438,18 @@ export class LokiService {
 
       if (groupByLabels.length > 0) {
         const labelSelects = groupByLabels.map(label => {
-          // Map common label names to our schema
+          const safeLabel = label.replace(/\./g, '_');
           switch (label.toLowerCase()) {
             case 'service_name':
             case 'service':
               return 'ServiceName as service_name';
             case 'severity':
             case 'level':
-              return `SeverityText as ${label}`;
+              return `SeverityText as ${safeLabel}`;
             default:
-              // For other labels, try to extract from LogAttributes
-              return `LogAttributes['${label}'] as ${label}`;
+              // For other labels, try to extract from ResourceAttributes and LogAttributes
+              // Handle nested field names like k8s.container.name as single keys
+              return `COALESCE(ResourceAttributes['${label}'], LogAttributes['${label}']) as ${safeLabel}`;
           }
         });
         selectClause = `toUnixTimestamp(toStartOfInterval(Timestamp, INTERVAL ${stepSeconds} SECOND)) as timestamp, ` + labelSelects.join(', ') + ', COUNT(*) as volume';
@@ -1459,7 +1462,7 @@ export class LokiService {
             case 'level':
               return 'SeverityText';
             default:
-              return `LogAttributes['${label}']`;
+              return `COALESCE(ResourceAttributes['${label}'], LogAttributes['${label}'])`;
           }
         }).join(', ');
       }
@@ -1506,11 +1509,12 @@ export class LokiService {
         if (targetLabels) {
           // Only include targetLabels in the metric
           targetLabels.split(',').map(label => label.trim()).forEach(label => {
-            if (result[label] !== null && result[label] !== undefined) {
+            const safeLabel = label.replace(/\./g, '_');
+            if (result[safeLabel] !== null && result[safeLabel] !== undefined) {
               if (label === 'severity' || label === 'level') {
-                metric[label] = this.mapSeverityToLevel(result[label].toString());
+                metric[label] = this.mapSeverityToLevel(result[safeLabel].toString());
               } else {
-                metric[label] = result[label].toString();
+                metric[label] = result[safeLabel].toString();
               }
             }
           });
