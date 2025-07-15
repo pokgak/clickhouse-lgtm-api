@@ -1,4 +1,4 @@
-# ClickHouse LGTM API
+# ClickHouse LGTM Adapter
 
 A ClickHouse adapter that provides Loki-compatible API endpoints for querying OpenTelemetry logs stored in ClickHouse. This project enables you to use ClickHouse as a high-performance backend for log storage while maintaining compatibility with the Loki query API.
 

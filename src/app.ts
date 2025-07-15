@@ -243,7 +243,7 @@ app.get('/health', async (req, res) => {
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'ClickHouse LGTM API',
+    message: 'ClickHouse LGTM Adapter',
     version: '1.0.0',
     endpoints: {
       'Loki API': '/loki/api/v1/*',

@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: ClickHouse LGTM API
+  title: ClickHouse LGTM Adapter
   description: |
     A ClickHouse adapter that provides Loki-compatible API endpoints for querying OpenTelemetry logs stored in ClickHouse.
 
@@ -18,7 +18,7 @@ info:
     - **Not Implemented**: `/loki/api/v1/patterns` - Log pattern analysis
   version: 1.0.0
   contact:
-    name: ClickHouse LGTM API
+    name: ClickHouse LGTM Adapter
     url: https://github.com/pokgak/clickhouse-lgtm-api
   license:
     name: MIT

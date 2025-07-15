@@ -1,7 +1,7 @@
 {
-  "name": "clickhouse-lgtm-api",
+  "name": "clickhouse-lgtm-adapter",
   "version": "1.0.0",
-  "description": "API server for ClickHouse LGTM (Loki, Grafana, Tempo, Mimir) integration",
+      "description": "ClickHouse adapter that provides Loki-compatible API endpoints for querying OpenTelemetry logs",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
