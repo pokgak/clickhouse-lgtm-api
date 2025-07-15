@@ -691,8 +691,8 @@ export class LokiService {
   async getDetectedFields(query?: string, start?: string, end?: string): Promise<DetectedFieldsResponse> {
     try {
       // Parse timestamps
-      const startTimestamp = start || dateTime64HoursAgo(24);
-      const endTimestamp = end || nowDateTime64();
+      const startTimestamp = start ? this.parseTimestamp(start) : dateTime64HoursAgo(24);
+      const endTimestamp = end ? this.parseTimestamp(end) : nowDateTime64();
 
       // Handle empty query - logs-drilldown expects empty string, not {}
       const processedQuery = query === '{}' ? '' : query;
@@ -897,7 +897,7 @@ export class LokiService {
     const cleanValue = value.replace(/^["']|["']$/g, '');
 
     // Check for boolean
-    if (cleanValue === 'true' || cleanValue === 'false') {
+    if (cleanValue.toLowerCase() === 'true' || cleanValue.toLowerCase() === 'false') {
       return 'boolean';
     }
 
@@ -911,41 +911,37 @@ export class LokiService {
       return 'float';
     }
 
-    // Check for duration (simple patterns)
-    if (/^\d+[smhdwy]$/.test(cleanValue) || /^\d+\.\d+[smhdwy]$/.test(cleanValue)) {
+    // Check for duration (e.g., "1s", "2m", "3h")
+    if (/^\d+[smhd]$/.test(cleanValue)) {
       return 'duration';
     }
 
-    // Check for bytes (with units)
-    const bytesUnits = ['b', 'kb', 'mb', 'gb', 'tb', 'kib', 'mib', 'gib', 'tib'];
-    const hasBytesUnit = bytesUnits.some(unit =>
-      cleanValue.toLowerCase().endsWith(unit) &&
-      /^\d+/.test(cleanValue.toLowerCase().replace(unit, ''))
-    );
-    if (hasBytesUnit) {
+    // Check for bytes (e.g., "1KB", "2MB", "3GB")
+    if (/^\d+[KMGT]?B$/.test(cleanValue.toUpperCase())) {
       return 'bytes';
     }
 
+    // Default to string
     return 'string';
   }
 
   private getTypePriority(type: 'string' | 'int' | 'float' | 'boolean' | 'duration' | 'bytes'): number {
     const priorities = {
-      'string': 0,
-      'boolean': 1,
-      'int': 2,
-      'float': 3,
-      'duration': 4,
-      'bytes': 5,
+      'string': 1,
+      'boolean': 2,
+      'int': 3,
+      'float': 4,
+      'duration': 5,
+      'bytes': 6
     };
-    return priorities[type];
+    return priorities[type] || 1;
   }
 
   async getDetectedFieldValues(fieldName: string, query?: string, start?: string, end?: string): Promise<DetectedFieldsResponse> {
     try {
       // Parse timestamps
-      const startTimestamp = start || dateTime64HoursAgo(24);
-      const endTimestamp = end || nowDateTime64();
+      const startTimestamp = start ? this.parseTimestamp(start) : dateTime64HoursAgo(24);
+      const endTimestamp = end ? this.parseTimestamp(end) : nowDateTime64();
 
       // Build query to get log entries for field value extraction
       let sql = `
@@ -984,20 +980,9 @@ export class LokiService {
       // Extract values for the specific field
       const values = new Set<string>();
 
-      // Handle special case for detected_level
-      if (fieldName === 'detected_level') {
-        for (const entry of results) {
-          if (entry.SeverityText) {
-            const level = this.mapSeverityToLevel(entry.SeverityText);
-            values.add(level);
-          }
-        }
-      } else {
-        // Extract field values from log bodies
-        for (const entry of results) {
-          const fieldValues = this.extractFieldValues(entry.Body, fieldName);
-          fieldValues.forEach(value => values.add(value));
-        }
+      for (const entry of results) {
+        const fieldValues = this.extractFieldValues(entry.Body, fieldName);
+        fieldValues.forEach(value => values.add(value));
       }
 
       return {
@@ -1068,8 +1053,8 @@ export class LokiService {
   async getDetectedLabels(query?: string, start?: string, end?: string): Promise<DetectedLabelsResponse> {
     try {
       // Parse timestamps (default: last 24h)
-      const startTimestamp = start || dateTime64HoursAgo(24);
-      const endTimestamp = end || nowDateTime64();
+      const startTimestamp = start ? this.parseTimestamp(start) : dateTime64HoursAgo(24);
+      const endTimestamp = end ? this.parseTimestamp(end) : nowDateTime64();
 
       // Handle empty query - logs-drilldown expects empty string, not {}
       const processedQuery = query === '{}' ? '' : query;
