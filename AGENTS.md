@@ -2,7 +2,7 @@
 
 ## Project Overview
 TypeScript API project for ClickHouse LGTM (Logs, Grafana, Traces, Metrics) integration with Loki endpoints.
-
+i
 ## Build/Test Commands
 - No package.json found - this appears to be a minimal TypeScript project
 - Use `tsc` to compile TypeScript files
@@ -18,7 +18,7 @@ TypeScript API project for ClickHouse LGTM (Logs, Grafana, Traces, Metrics) inte
 ## API Documentation
 Loki API endpoints to implement:
 - GET /loki/api/v1/query
-- GET /loki/api/v1/query_range  
+- GET /loki/api/v1/query_range
 - GET /loki/api/v1/labels
 - GET /loki/api/v1/label/<name>/values
 - GET /loki/api/v1/series
