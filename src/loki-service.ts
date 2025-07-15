@@ -664,7 +664,7 @@ export class LokiService {
               return 'ServiceName as service_name';
             case 'severity':
             case 'level':
-              return 'SeverityText as severity';
+              return `SeverityText as ${label}`;
             default:
               // For other labels, try to extract from LogAttributes
               return `LogAttributes['${label}'] as ${label}`;
@@ -802,7 +802,7 @@ export class LokiService {
               return 'ServiceName as service_name';
             case 'severity':
             case 'level':
-              return 'SeverityText as severity';
+              return `SeverityText as ${label}`;
             default:
               // For other labels, try to extract from LogAttributes
               return `LogAttributes['${label}'] as ${label}`;
