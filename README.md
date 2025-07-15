@@ -21,6 +21,8 @@ A ClickHouse adapter that provides Loki-compatible API endpoints for querying Op
 
 ### Supported Loki Endpoints
 
+> **Note**: The `/loki/api/v1/detected_labels` and `/loki/api/v1/detected_fields` endpoints are Grafana-specific extensions for the Logs Drilldown feature and are not part of the official Loki API specification.
+
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
 | `/loki/api/v1/query` | GET | ✅ | Instant log queries with LogQL |
@@ -31,8 +33,8 @@ A ClickHouse adapter that provides Loki-compatible API endpoints for querying Op
 | `/loki/api/v1/index/stats` | GET | ✅ | Get index statistics |
 | `/loki/api/v1/index/volume` | GET | ✅ | Get log volume by label |
 | `/loki/api/v1/index/volume_range` | GET | ✅ | Get log volume over time |
-| `/loki/api/v1/detected_labels` | GET | ✅ | Get detected labels for drilldown |
-| `/loki/api/v1/detected_fields` | GET | ✅ | Get detected fields for parsing |
+| `/loki/api/v1/detected_labels` | GET | ✅ | Get detected labels for Grafana drilldown (Grafana-specific) |
+| `/loki/api/v1/detected_fields` | GET | ✅ | Get detected fields for Grafana drilldown (Grafana-specific) |
 | `/loki/api/v1/tail` | GET | ✅ | Real-time log streaming (SSE) |
 | `/loki/api/v1/patterns` | GET | ❌ | Log pattern analysis (not implemented) |
 
