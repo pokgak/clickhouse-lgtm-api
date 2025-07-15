@@ -271,4 +271,14 @@ app.get('/docs', (req, res) => {
   res.redirect('https://editor.swagger.io/?url=' + encodeURIComponent(req.protocol + '://' + req.get('host') + '/openapi.yaml'));
 });
 
+// Catch-all for unhandled routes: return JSON 404
+app.use((req, res) => {
+  res.status(404).json({
+    status: 'error',
+    error: 'Not found',
+    errorType: 'NotFound',
+    path: req.originalUrl
+  });
+});
+
 export default app;
