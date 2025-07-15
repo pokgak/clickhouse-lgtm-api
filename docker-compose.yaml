@@ -11,7 +11,6 @@ services:
       CLICKHOUSE_PASSWORD: ""
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ./docker/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
     ulimits:
       nofile:
         soft: 262144
@@ -87,7 +86,7 @@ services:
 
   # OpenTelemetry log generator
   log-generator:
-    image: ghcr.io/krzko/otelgen
+    image: krzko/otelgen:latest
     container_name: log-generator
     command: >
       otelgen --protocol grpc 
