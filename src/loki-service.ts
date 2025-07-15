@@ -394,8 +394,10 @@ export class LokiService {
     try {
       // Parse step (default to 1 hour if not provided)
       const stepSeconds = step ? this.parseStep(step) : 3600;
-      const startTime = start ? new Date(start) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const endTime = end ? new Date(end) : new Date();
+
+      // Parse timestamps properly for ClickHouse
+      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
+      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
 
       let sql = `
         SELECT
@@ -410,8 +412,8 @@ export class LokiService {
 
       conditions.push('Timestamp >= {start:DateTime64}');
       conditions.push('Timestamp <= {end:DateTime64}');
-      params.start = startTime.toISOString().replace('Z', '');
-      params.end = endTime.toISOString().replace('Z', '');
+      params.start = startTimestamp;
+      params.end = endTimestamp;
 
       if (query && query !== '{}') {
         const logqlQuery = {
