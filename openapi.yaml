@@ -1,0 +1,916 @@
+openapi: 3.0.3
+info:
+  title: ClickHouse LGTM API
+  description: |
+    A ClickHouse adapter that provides Loki-compatible API endpoints for querying OpenTelemetry logs stored in ClickHouse.
+
+    This API implements the Loki query API v1 specification, enabling seamless integration with existing Loki-compatible tools and Grafana dashboards.
+
+    ## Features
+    - Full Loki API v1 compatibility
+    - Real-time log streaming with Server-Sent Events
+    - LogQL query language support
+    - High-performance ClickHouse backend
+    - OpenTelemetry integration
+
+    ## Current Status
+    - **Implemented**: 9/10 Loki endpoints
+    - **Not Implemented**: `/loki/api/v1/patterns` - Log pattern analysis
+  version: 1.0.0
+  contact:
+    name: ClickHouse LGTM API
+    url: https://github.com/pokgak/clickhouse-lgtm-api
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3100
+    description: Local development server
+  - url: https://api.example.com
+    description: Production server
+
+tags:
+  - name: Query
+    description: Log query endpoints
+  - name: Labels
+    description: Label and series discovery
+  - name: Index
+    description: Index statistics and volume
+  - name: Streaming
+    description: Real-time log streaming
+  - name: Patterns
+    description: Log pattern analysis (not implemented)
+
+paths:
+  /loki/api/v1/query:
+    get:
+      tags:
+        - Query
+      summary: Instant log query
+      description: |
+        Execute an instant LogQL query and return the results.
+
+        This endpoint supports all LogQL features including label matchers, text filters, time ranges, and aggregations.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: LogQL query string
+          schema:
+            type: string
+            example: '{service_name="otelgen"} |= "error"'
+        - name: time
+          in: query
+          description: Unix timestamp for query time (defaults to now)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: limit
+          in: query
+          description: Maximum number of entries to return
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 5000
+        - name: direction
+          in: query
+          description: Query direction
+          schema:
+            type: string
+            enum: [forward, backward]
+            default: backward
+      responses:
+        '200':
+          description: Successful query response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          description: Bad request - invalid query or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/query_range:
+    get:
+      tags:
+        - Query
+      summary: Range log query
+      description: |
+        Execute a LogQL query over a time range with step intervals.
+
+        This endpoint is useful for creating time series visualizations and aggregations over time periods.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: LogQL query string
+          schema:
+            type: string
+            example: 'rate({service_name="otelgen"}[5m])'
+        - name: start
+          in: query
+          required: true
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          required: true
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+        - name: step
+          in: query
+          description: Query resolution step width (e.g., "60s", "5m", "1h")
+          schema:
+            type: string
+            example: "60s"
+        - name: limit
+          in: query
+          description: Maximum number of entries to return
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 5000
+        - name: direction
+          in: query
+          description: Query direction
+          schema:
+            type: string
+            enum: [forward, backward]
+            default: backward
+      responses:
+        '200':
+          description: Successful range query response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryRangeResponse'
+        '400':
+          description: Bad request - invalid query or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/labels:
+    get:
+      tags:
+        - Labels
+      summary: Get all labels
+      description: |
+        Retrieve all available log labels within the specified time range.
+
+        This endpoint is useful for discovering what labels are available for filtering.
+      parameters:
+        - name: start
+          in: query
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+      responses:
+        '200':
+          description: Successful labels response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelsResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/label/{name}/values:
+    get:
+      tags:
+        - Labels
+      summary: Get label values
+      description: |
+        Retrieve all values for a specific label within the specified time range.
+
+        This endpoint is useful for discovering what values are available for a specific label.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Label name
+          schema:
+            type: string
+            example: "service_name"
+        - name: start
+          in: query
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+      responses:
+        '200':
+          description: Successful label values response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelValuesResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/series:
+    get:
+      tags:
+        - Labels
+      summary: Get series
+      description: |
+        Retrieve log series metadata based on label matchers.
+
+        This endpoint returns the set of label values for each label name that matches the provided matchers.
+      parameters:
+        - name: match[]
+          in: query
+          description: Series matcher(s) in the format {label=value}
+          schema:
+            type: array
+            items:
+              type: string
+            example: ["{service_name=\"otelgen\"}", "{severity=\"ERROR\"}"]
+        - name: start
+          in: query
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+      responses:
+        '200':
+          description: Successful series response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeriesResponse'
+        '400':
+          description: Bad request - invalid matchers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/index/stats:
+    get:
+      tags:
+        - Index
+      summary: Get index statistics
+      description: |
+        Retrieve index statistics for the specified query and time range.
+
+        This endpoint provides information about the index performance and structure.
+      parameters:
+        - name: query
+          in: query
+          description: Query filter
+          schema:
+            type: string
+            example: '{service_name="otelgen"}'
+        - name: start
+          in: query
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+      responses:
+        '200':
+          description: Successful index stats response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexStatsResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/index/volume:
+    get:
+      tags:
+        - Index
+      summary: Get index volume
+      description: |
+        Retrieve log volume by label for the specified query and time range.
+
+        This endpoint provides insights into log volume distribution across different labels.
+      parameters:
+        - name: query
+          in: query
+          description: Query filter
+          schema:
+            type: string
+            example: '{service_name="otelgen"}'
+        - name: start
+          in: query
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+        - name: limit
+          in: query
+          description: Maximum number of results to return
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+      responses:
+        '200':
+          description: Successful index volume response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexVolumeResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/index/volume_range:
+    get:
+      tags:
+        - Index
+      summary: Get index volume over time
+      description: |
+        Retrieve log volume over time for the specified query and time range.
+
+        This endpoint provides time series data of log volume for creating volume trend visualizations.
+      parameters:
+        - name: query
+          in: query
+          description: Query filter
+          schema:
+            type: string
+            example: '{service_name="otelgen"}'
+        - name: start
+          in: query
+          required: true
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          required: true
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+        - name: step
+          in: query
+          required: true
+          description: Time step interval (e.g., "60s", "5m", "1h")
+          schema:
+            type: string
+            example: "60s"
+      responses:
+        '200':
+          description: Successful index volume range response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IndexVolumeRangeResponse'
+        '400':
+          description: Bad request - missing required parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/tail:
+    get:
+      tags:
+        - Streaming
+      summary: Real-time log streaming
+      description: |
+        Stream logs in real-time using Server-Sent Events (SSE).
+
+        This endpoint provides live log updates for the specified query. The response is a stream of Server-Sent Events.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: LogQL query string
+          schema:
+            type: string
+            example: '{service_name="otelgen"}'
+        - name: start
+          in: query
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: limit
+          in: query
+          description: Maximum number of entries per poll
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Real-time log stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events stream
+        '400':
+          description: Bad request - invalid query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /loki/api/v1/patterns:
+    get:
+      tags:
+        - Patterns
+      summary: Get log patterns
+      description: |
+        Analyze log patterns and return pattern statistics.
+
+        **⚠️ This endpoint is not implemented yet.** It will be available in a future release.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: LogQL query string
+          schema:
+            type: string
+            example: '{service_name="otelgen"}'
+        - name: start
+          in: query
+          required: true
+          description: Start timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640995200"
+        - name: end
+          in: query
+          required: true
+          description: End timestamp (Unix timestamp or RFC3339)
+          schema:
+            type: string
+            example: "1640998800"
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotImplementedResponse'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Check the health status of the LGTM adapter
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-01-01T12:00:00Z"
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "unhealthy"
+                  error:
+                    type: string
+                    example: "ClickHouse connection failed"
+
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: Check if the service is ready to handle requests
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ready"
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "not ready"
+                  error:
+                    type: string
+                    example: "Initializing..."
+
+components:
+  schemas:
+    QueryResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: object
+          properties:
+            resultType:
+              type: string
+              enum: [streams]
+              example: "streams"
+            result:
+              type: array
+              items:
+                $ref: '#/components/schemas/Stream'
+      required:
+        - status
+        - data
+
+    QueryRangeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: object
+          properties:
+            resultType:
+              type: string
+              enum: [matrix, streams, scalar, vector]
+              example: "matrix"
+            result:
+              type: array
+              items:
+                oneOf:
+                  - $ref: '#/components/schemas/Stream'
+                  - $ref: '#/components/schemas/Matrix'
+      required:
+        - status
+        - data
+
+    Stream:
+      type: object
+      properties:
+        stream:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label key-value pairs
+          example:
+            service_name: "otelgen"
+            severity: "INFO"
+        values:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+            minItems: 2
+            maxItems: 2
+          description: Array of [timestamp, log line] pairs
+          example:
+            - ["1640995200000000000", "log message 1"]
+            - ["1640995201000000000", "log message 2"]
+      required:
+        - stream
+        - values
+
+    Matrix:
+      type: object
+      properties:
+        metric:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label key-value pairs
+        values:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+            minItems: 2
+            maxItems: 2
+          description: Array of [timestamp, value] pairs
+      required:
+        - metric
+        - values
+
+    LabelsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: array
+          items:
+            type: string
+          example: ["service_name", "severity", "host"]
+      required:
+        - status
+        - data
+
+    LabelValuesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: array
+          items:
+            type: string
+          example: ["otelgen", "web-server", "api-gateway"]
+      required:
+        - status
+        - data
+
+    SeriesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+          example:
+            - service_name: "otelgen"
+              severity: "INFO"
+            - service_name: "otelgen"
+              severity: "ERROR"
+      required:
+        - status
+        - data
+
+    IndexStatsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: object
+          properties:
+            streams:
+              type: integer
+              description: Number of streams
+              example: 100
+            chunks:
+              type: integer
+              description: Number of chunks
+              example: 500
+            bytes:
+              type: integer
+              description: Total bytes
+              example: 1048576
+            entries:
+              type: integer
+              description: Total log entries
+              example: 10000
+      required:
+        - status
+        - data
+
+    IndexVolumeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Label name
+                example: "service_name"
+              values:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                      description: Label value
+                      example: "otelgen"
+                    volume:
+                      type: integer
+                      description: Log volume for this value
+                      example: 1000
+      required:
+        - status
+        - data
+
+    IndexVolumeRangeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                description: Timestamp
+                example: "1640995200"
+              volume:
+                type: integer
+                description: Log volume at this timestamp
+                example: 100
+      required:
+        - status
+        - data
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [error]
+          example: "error"
+        error:
+          type: string
+          description: Error message
+          example: "Invalid query syntax"
+        errorType:
+          type: string
+          description: Type of error
+          example: "BadData"
+      required:
+        - status
+        - error
+
+    NotImplementedResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [error]
+          example: "error"
+        error:
+          type: string
+          description: Error message
+          example: "This endpoint is not implemented yet. It will be available in a future release."
+        errorType:
+          type: string
+          enum: [NotImplemented]
+          example: "NotImplemented"
+        endpoint:
+          type: string
+          description: The endpoint that is not implemented
+          example: "/loki/api/v1/patterns"
+      required:
+        - status
+        - error
+        - errorType
+        - endpoint
+
+  examples:
+    QueryExample:
+      summary: Simple log query
+      value:
+        query: '{service_name="otelgen"} |= "error"'
+        limit: 10
+        direction: backward
+
+    RangeQueryExample:
+      summary: Time range query with aggregation
+      value:
+        query: 'rate({service_name="otelgen"}[5m])'
+        start: "1640995200"
+        end: "1640998800"
+        step: "60s"
+
+    TailQueryExample:
+      summary: Real-time log streaming
+      value:
+        query: '{service_name="otelgen"}'
+        limit: 5
+
+externalDocs:
+  description: Loki API Documentation
+  url: https://grafana.com/docs/loki/latest/api/

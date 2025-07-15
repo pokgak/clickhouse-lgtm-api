@@ -199,6 +199,17 @@ app.get('/loki/api/v1/tail', async (req, res) => {
   });
 });
 
+app.get('/loki/api/v1/patterns', async (req, res) => {
+  // Return 501 Not Implemented with clear message
+  res.status(501).json({
+    status: 'error',
+    error: 'This endpoint is not implemented yet. It will be available in a future release.',
+    errorType: 'NotImplemented',
+    endpoint: '/loki/api/v1/patterns',
+    message: 'Log pattern analysis is planned for future releases. This endpoint will provide pattern discovery and analysis capabilities for log data.'
+  });
+});
+
 // Loki health check endpoints
 app.get('/ready', async (req, res) => {
   const isHealthy = await clickhouse.ping();
@@ -235,10 +246,29 @@ app.get('/', (req, res) => {
     message: 'ClickHouse LGTM API',
     version: '1.0.0',
     endpoints: {
-      health: '/health',
-      loki: '/loki/api/v1/*'
+      'Loki API': '/loki/api/v1/*',
+      'Health': '/health',
+      'Ready': '/ready',
+      'OpenAPI Spec': '/openapi.yaml',
+      'API Documentation': '/docs'
+    },
+    features: {
+      'Implemented': 9,
+      'Total': 10,
+      'Missing': ['/loki/api/v1/patterns']
     }
   });
+});
+
+// Serve OpenAPI specification
+app.get('/openapi.yaml', (req, res) => {
+  res.setHeader('Content-Type', 'text/yaml');
+  res.sendFile('openapi.yaml', { root: '.' });
+});
+
+// Serve API documentation (redirect to Swagger UI)
+app.get('/docs', (req, res) => {
+  res.redirect('https://editor.swagger.io/?url=' + encodeURIComponent(req.protocol + '://' + req.get('host') + '/openapi.yaml'));
 });
 
 export default app;
