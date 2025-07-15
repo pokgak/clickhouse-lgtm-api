@@ -31,6 +31,20 @@ app.get('/loki/api/v1/query', async (req, res) => {
     });
   }
 
+  // Handle Grafana health check queries (Prometheus-style)
+  if (query === 'vector(1)+vector(1)' || (query as string).startsWith('vector(')) {
+    return res.json({
+      status: 'success',
+      data: {
+        resultType: 'vector',
+        result: [{
+          metric: {},
+          value: [Math.floor(Date.now() / 1000), '2']
+        }]
+      }
+    });
+  }
+
   const result = await lokiService.query(
     query as string,
     time as string,
@@ -86,6 +100,29 @@ app.get('/loki/api/v1/series', async (req, res) => {
 
   res.json(result);
 });
+
+// Loki health check endpoints
+app.get('/ready', async (req, res) => {
+  const isHealthy = await clickhouse.ping();
+  if (isHealthy) {
+    res.status(200).send('ready');
+  } else {
+    res.status(503).send('not ready');
+  }
+});
+
+app.get('/loki/api/v1/status/buildinfo', (req, res) => {
+  res.json({
+    version: "2.9.0",
+    revision: "clickhouse-adapter",
+    branch: "main",
+    buildDate: new Date().toISOString(),
+    buildUser: "clickhouse-lgtm-api",
+    goVersion: "go1.21.0"
+  });
+});
+
+
 
 app.get('/health', async (req, res) => {
   const isHealthy = await clickhouse.ping();
