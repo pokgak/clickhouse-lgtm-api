@@ -5,7 +5,7 @@ datasources:
   - name: Loki (ClickHouse)
     type: loki
     access: proxy
-    url: http://lgtm-adapter:5000
+    url: http://lgtm-adapter:3100
     isDefault: true
     editable: true
     jsonData:
