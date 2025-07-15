@@ -149,13 +149,19 @@ export class LogQLTranslator {
   }
 
   private parseTimestamp(timestamp: string): string {
-    // Handle nanosecond timestamps from Grafana
-    if (timestamp.length > 13) {
-      // Convert nanoseconds to milliseconds
-      const ms = parseInt(timestamp.substring(0, 13));
-      return new Date(ms).toISOString().replace('Z', '');
+    // Check if it's a Unix timestamp (numeric)
+    if (/^\d+$/.test(timestamp)) {
+      // Handle nanosecond timestamps from Grafana
+      if (timestamp.length > 13) {
+        // Convert nanoseconds to milliseconds
+        const ms = parseInt(timestamp.substring(0, 13));
+        return new Date(ms).toISOString().replace('Z', '');
+      } else {
+        // Regular Unix timestamp in seconds
+        return new Date(parseInt(timestamp) * 1000).toISOString().replace('Z', '');
+      }
     }
-    // Handle regular timestamps
+    // Handle ISO timestamps
     return new Date(timestamp).toISOString().replace('Z', '');
   }
 

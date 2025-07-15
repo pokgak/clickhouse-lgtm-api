@@ -61,8 +61,28 @@ export class LokiService {
     end: string,
     limit?: number,
     direction?: 'forward' | 'backward'
-  ): Promise<LokiQueryRangeResponse> {
+  ): Promise<LokiQueryRangeResponse | LokiIndexVolumeRangeResponse> {
     try {
+      // Detect aggregation queries (count_over_time, sum by, etc.)
+      const isAggregation = /count_over_time|sum by|rate|avg_over_time|sum_over_time|histogram_quantile/.test(query);
+
+      console.log('queryRange called with:', { query, start, end, limit, direction, isAggregation });
+
+      if (isAggregation) {
+        // Use getIndexVolumeRange for log volume queries
+        // Extract step from query if present (Grafana usually provides it as a query param, but fallback to 1m)
+        let step = '60s';
+        const stepMatch = query.match(/\[(\d+)([smhd])\]/);
+        if (stepMatch) {
+          const value = parseInt(stepMatch[1]);
+          const unit = stepMatch[2];
+          step = `${value}${unit}`;
+        }
+
+        console.log('Detected aggregation query, using getIndexVolumeRange with step:', step);
+        return await this.getIndexVolumeRange(query, start, end, step);
+      }
+
       const logqlQuery = {
         query,
         start,
@@ -72,9 +92,14 @@ export class LokiService {
       };
 
       const { sql, params } = this.translator.translateQuery(logqlQuery);
+      console.log('Generated SQL:', sql);
+      console.log('SQL params:', params);
+
       const results = await this.clickhouse.query<LogEntry>(sql, params);
+      console.log('Query results count:', results.length);
 
       const streams = this.formatAsStreams(results);
+      console.log('Formatted streams count:', streams.length);
 
       return {
         status: 'success',
@@ -84,6 +109,7 @@ export class LokiService {
         }
       };
     } catch (error) {
+      console.error('queryRange error:', error);
       return {
         status: 'error',
         data: { resultType: 'streams', result: [] },
@@ -185,6 +211,33 @@ export class LokiService {
     }
   }
 
+  private mapSeverityToLevel(severityText: string): string {
+    const severity = severityText.toLowerCase();
+
+    // Map to Grafana's expected level values for coloring
+    if (severity.includes('fatal') || severity.includes('critical') || severity.includes('emerg') || severity.includes('alert') || severity.includes('crit')) {
+      return 'critical';
+    }
+    if (severity.includes('error') || severity.includes('err')) {
+      return 'error';
+    }
+    if (severity.includes('warn')) {
+      return 'warning';
+    }
+    if (severity.includes('info') || severity.includes('information') || severity.includes('informational') || severity.includes('notice')) {
+      return 'info';
+    }
+    if (severity.includes('debug') || severity.includes('dbug')) {
+      return 'debug';
+    }
+    if (severity.includes('trace')) {
+      return 'trace';
+    }
+
+    // Default to unknown for unrecognized levels
+    return 'unknown';
+  }
+
   private formatAsStreams(results: LogEntry[]): LokiStream[] {
     const streamMap = new Map<string, LokiStream>();
 
@@ -193,6 +246,11 @@ export class LokiService {
         service_name: entry.ServiceName,
         severity: entry.SeverityText
       };
+
+      // Add 'level' label for Grafana coloring (mapped to expected values)
+      if (entry.SeverityText) {
+        labels.level = this.mapSeverityToLevel(entry.SeverityText);
+      }
 
       // Add trace/span info if available
       if (entry.TraceId) {
@@ -401,8 +459,16 @@ export class LokiService {
 
       let sql = `
         SELECT
-          ServiceName,
           toUnixTimestamp(toStartOfInterval(Timestamp, INTERVAL ${stepSeconds} SECOND)) as timestamp,
+          CASE
+            WHEN lower(SeverityText) LIKE '%fatal%' OR lower(SeverityText) LIKE '%critical%' OR lower(SeverityText) LIKE '%emerg%' OR lower(SeverityText) LIKE '%alert%' OR lower(SeverityText) LIKE '%crit%' THEN 'critical'
+            WHEN lower(SeverityText) LIKE '%error%' OR lower(SeverityText) LIKE '%err%' THEN 'error'
+            WHEN lower(SeverityText) LIKE '%warn%' THEN 'warning'
+            WHEN lower(SeverityText) LIKE '%info%' OR lower(SeverityText) LIKE '%information%' OR lower(SeverityText) LIKE '%informational%' OR lower(SeverityText) LIKE '%notice%' THEN 'info'
+            WHEN lower(SeverityText) LIKE '%debug%' OR lower(SeverityText) LIKE '%dbug%' THEN 'debug'
+            WHEN lower(SeverityText) LIKE '%trace%' THEN 'trace'
+            ELSE 'unknown'
+          END as level,
           COUNT(*) as volume
         FROM ${this.translator['logsTable']}
       `;
@@ -430,26 +496,26 @@ export class LokiService {
       }
 
       sql += ' WHERE ' + conditions.join(' AND ');
-      sql += ' GROUP BY ServiceName, timestamp ORDER BY ServiceName, timestamp';
+      sql += ' GROUP BY level, timestamp ORDER BY level, timestamp';
 
       const results = await this.clickhouse.query<{
-        ServiceName: string;
+        level: string;
         timestamp: number;
         volume: number;
       }>(sql, params);
 
-      // Group by service name
-      const serviceMap = new Map<string, Array<[number, string]>>();
+      // Group by level for colored bars
+      const levelMap = new Map<string, Array<[number, string]>>();
 
       for (const result of results) {
-        if (!serviceMap.has(result.ServiceName)) {
-          serviceMap.set(result.ServiceName, []);
+        if (!levelMap.has(result.level)) {
+          levelMap.set(result.level, []);
         }
-        serviceMap.get(result.ServiceName)!.push([result.timestamp, result.volume.toString()]);
+        levelMap.get(result.level)!.push([result.timestamp, result.volume.toString()]);
       }
 
-      const matrixResult = Array.from(serviceMap.entries()).map(([serviceName, values]) => ({
-        metric: { service_name: serviceName },
+      const matrixResult = Array.from(levelMap.entries()).map(([level, values]) => ({
+        metric: { level: level },
         values
       }));
 
