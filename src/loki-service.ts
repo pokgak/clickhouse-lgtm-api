@@ -862,6 +862,9 @@ export class LokiService {
 
       sql += ` GROUP BY ${groupByClause} ORDER BY timestamp`;
 
+      // Debug log
+      console.log('getIndexVolumeRange SQL:', sql);
+      console.log('getIndexVolumeRange params:', params);
       const results = await this.clickhouse.query<any>(sql, params);
 
       // Group by metric labels for matrix format
