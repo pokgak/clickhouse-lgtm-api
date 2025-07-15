@@ -101,6 +101,60 @@ app.get('/loki/api/v1/series', async (req, res) => {
   res.json(result);
 });
 
+app.get('/loki/api/v1/detected_labels', async (req, res) => {
+  const { query, start, end } = req.query;
+
+  // Validate required parameters
+  if (!start) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'start parameter is required'
+    });
+  }
+
+  if (!end) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'end parameter is required'
+    });
+  }
+
+  const result = await lokiService.getDetectedLabels(
+    query as string,
+    start as string,
+    end as string
+  );
+
+  res.json(result);
+});
+
+app.get('/loki/api/v1/detected_fields', async (req, res) => {
+  const { query, start, end } = req.query;
+
+  // Validate required parameters
+  if (!start) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'start parameter is required'
+    });
+  }
+
+  if (!end) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'end parameter is required'
+    });
+  }
+
+  const result = await lokiService.getDetectedFields(
+    query as string,
+    start as string,
+    end as string
+  );
+
+  res.json(result);
+});
+
 app.get('/loki/api/v1/index/stats', async (req, res) => {
   const { query, start, end } = req.query;
 
@@ -114,26 +168,74 @@ app.get('/loki/api/v1/index/stats', async (req, res) => {
 });
 
 app.get('/loki/api/v1/index/volume', async (req, res) => {
-  const { query, start, end, limit } = req.query;
+  const { query, start, end, limit, targetLabels, aggregateBy } = req.query;
+
+  // Validate required parameters
+  if (!query) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'query parameter is required'
+    });
+  }
+
+  if (!start) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'start parameter is required'
+    });
+  }
+
+  if (!end) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'end parameter is required'
+    });
+  }
 
   const result = await lokiService.getIndexVolume(
     query as string,
     start as string,
     end as string,
-    limit ? parseInt(limit as string) : undefined
+    limit ? parseInt(limit as string) : 100,
+    targetLabels as string,
+    aggregateBy as string
   );
 
   res.json(result);
 });
 
 app.get('/loki/api/v1/index/volume_range', async (req, res) => {
-  const { query, start, end, step } = req.query;
+  const { query, start, end, step, targetLabels, aggregateBy } = req.query;
+
+  // Validate required parameters
+  if (!query) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'query parameter is required'
+    });
+  }
+
+  if (!start) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'start parameter is required'
+    });
+  }
+
+  if (!end) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'end parameter is required'
+    });
+  }
 
   const result = await lokiService.getIndexVolumeRange(
     query as string,
     start as string,
     end as string,
-    step as string
+    step as string,
+    targetLabels as string,
+    aggregateBy as string
   );
 
   res.json(result);
@@ -231,14 +333,38 @@ app.get('/loki/api/v1/tail', async (req, res) => {
 });
 
 app.get('/loki/api/v1/patterns', async (req, res) => {
-  // Return 501 Not Implemented with clear message
-  res.status(501).json({
-    status: 'error',
-    error: 'This endpoint is not implemented yet. It will be available in a future release.',
-    errorType: 'NotImplemented',
-    endpoint: '/loki/api/v1/patterns',
-    message: 'Log pattern analysis is planned for future releases. This endpoint will provide pattern discovery and analysis capabilities for log data.'
-  });
+  const { query, start, end, step } = req.query;
+
+  // Validate required parameters
+  if (!query) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'query parameter is required'
+    });
+  }
+
+  if (!start) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'start parameter is required'
+    });
+  }
+
+  if (!end) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'end parameter is required'
+    });
+  }
+
+  const result = await lokiService.getPatterns(
+    query as string,
+    start as string,
+    end as string,
+    step as string
+  );
+
+  res.json(result);
 });
 
 // Loki health check endpoints

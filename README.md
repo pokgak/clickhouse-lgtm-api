@@ -31,6 +31,8 @@ A ClickHouse adapter that provides Loki-compatible API endpoints for querying Op
 | `/loki/api/v1/index/stats` | GET | ✅ | Get index statistics |
 | `/loki/api/v1/index/volume` | GET | ✅ | Get log volume by label |
 | `/loki/api/v1/index/volume_range` | GET | ✅ | Get log volume over time |
+| `/loki/api/v1/detected_labels` | GET | ✅ | Get detected labels for drilldown |
+| `/loki/api/v1/detected_fields` | GET | ✅ | Get detected fields for parsing |
 | `/loki/api/v1/tail` | GET | ✅ | Real-time log streaming (SSE) |
 | `/loki/api/v1/patterns` | GET | ❌ | Log pattern analysis (not implemented) |
 

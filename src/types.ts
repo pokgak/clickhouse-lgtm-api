@@ -53,9 +53,10 @@ export interface LokiIndexStatsResponse {
 export interface LokiIndexVolumeResponse {
   status: 'success' | 'error';
   data: {
-    volumes: Array<{
-      name: string;
-      volume: number;
+    resultType: 'vector';
+    result: Array<{
+      metric: Record<string, string>;
+      value: [number, string];
     }>;
   };
   error?: string;
@@ -70,6 +71,15 @@ export interface LokiIndexVolumeRangeResponse {
       values: [number, string][];
     }>;
   };
+  error?: string;
+}
+
+export interface LokiPatternsResponse {
+  status: 'success' | 'error';
+  data: Array<{
+    pattern: string;
+    samples: Array<[number, number]>; // [timestamp, count]
+  }>;
   error?: string;
 }
 
