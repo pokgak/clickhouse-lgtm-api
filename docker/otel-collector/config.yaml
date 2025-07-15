@@ -1,0 +1,95 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # For receiving logs from files (optional)
+  filelog:
+    include: ["/var/log/*.log"]
+    operators:
+      - type: json_parser
+        id: parser-json
+        output: extract_timestamp_parser
+      - type: time_parser
+        id: extract_timestamp_parser
+        parse_from: attributes.timestamp
+        layout: '%Y-%m-%d %H:%M:%S'
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "docker-compose"
+        action: upsert
+      - key: service.instance.id
+        from_attribute: host.name
+        action: insert
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    limit_mib: 512
+
+exporters:
+  debug:
+    verbosity: detailed
+
+  clickhouse:
+    endpoint: clickhouse://clickhouse:9000
+    username: default
+    password: ""
+    database: default
+    create_schema: true
+    connection_params:
+      enable_json_type: "1"
+    logs_table_name: otel_logs
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Prometheus metrics for monitoring
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    logs:
+      receivers: [otlp, filelog]
+      processors: [memory_limiter, resource, batch]
+      exporters: [clickhouse, debug]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, debug]
+    
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      address: 0.0.0.0:8888
