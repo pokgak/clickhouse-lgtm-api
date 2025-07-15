@@ -205,7 +205,10 @@ export class LokiService {
       // Parse JSON attributes safely
       try {
         if (entry.ResourceAttributes && typeof entry.ResourceAttributes === 'object') {
-          Object.assign(labels, entry.ResourceAttributes);
+          // Filter out service.name since it's already exposed as service_name
+          const filteredResourceAttrs = { ...entry.ResourceAttributes };
+          delete filteredResourceAttrs['service.name'];
+          Object.assign(labels, filteredResourceAttrs);
         }
       } catch (e) {
         // Ignore JSON parse errors
@@ -213,7 +216,10 @@ export class LokiService {
 
       try {
         if (entry.LogAttributes && typeof entry.LogAttributes === 'object') {
-          Object.assign(labels, entry.LogAttributes);
+          // Filter out service.name since it's already exposed as service_name
+          const filteredLogAttrs = { ...entry.LogAttributes };
+          delete filteredLogAttrs['service.name'];
+          Object.assign(labels, filteredLogAttrs);
         }
       } catch (e) {
         // Ignore JSON parse errors

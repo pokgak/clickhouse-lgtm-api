@@ -33,11 +33,11 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    # healthcheck:
+    #   test: ["CMD-SHELL", "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/13133' || exit 1"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
 
   lgtm-adapter:
     build:
@@ -86,17 +86,16 @@ services:
 
   # OpenTelemetry log generator
   log-generator:
-    image: ghcr.io/krzko/otelgen:latest
+    image: ghcr.io/krzko/otelgen
     container_name: log-generator
-    command: >
-      otelgen --protocol grpc 
-      --otel-exporter-otlp-endpoint otel-collector:4317 
-      --rate 5
-      --duration 0
-      logs multi
+    command:
+      - --otel-exporter-otlp-endpoint
+      - otel-collector:4317
+      - --insecure
+      - logs
+      - multi
     depends_on:
-      otel-collector:
-        condition: service_healthy
+      - otel-collector
     restart: unless-stopped
 
 volumes:
