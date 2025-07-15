@@ -87,7 +87,7 @@ services:
 
   # OpenTelemetry log generator
   log-generator:
-    image: krzko/otelgen:latest
+    image: ghcr.io/krzko/otelgen
     container_name: log-generator
     command: >
       otelgen --protocol grpc 
