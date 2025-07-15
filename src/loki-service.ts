@@ -87,7 +87,7 @@ export class LokiService {
           targetLabels = sumByMatch[1].split(',').map(label => label.trim()).join(',');
         }
 
-        console.log('Detected aggregation query, using getIndexVolumeRange with step:', step, 'targetLabels:', targetLabels);
+        console.log('Detected aggregation query, using getIndexVolumeRange with step:', step, 'targetLabels:', targetLabels, 'sumByMatch:', sumByMatch);
         return await this.getIndexVolumeRange(query, start, end, step, targetLabels);
       }
 
@@ -636,25 +636,21 @@ export class LokiService {
       const startTimestamp = this.parseTimestamp(start);
       const endTimestamp = this.parseTimestamp(end);
 
-      // Determine which labels to group by based on targetLabels and aggregateBy
+      // Only use targetLabels for grouping if set
       let groupByLabels: string[] = [];
-
-      if (aggregateBy === 'labels') {
+      if (targetLabels) {
+        groupByLabels = targetLabels.split(',').map(label => label.trim());
+      } else if (aggregateBy === 'labels') {
         // For labels aggregation, we need to extract label names from the query
         const labelMatches = query.match(/(\w+)=/g);
         if (labelMatches) {
           groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
       } else {
-        // For series aggregation (default), use targetLabels or extract from query
-        if (targetLabels) {
-          groupByLabels = targetLabels.split(',').map(label => label.trim());
-        } else {
-          // Extract labels from the query
-          const labelMatches = query.match(/(\w+)=/g);
-          if (labelMatches) {
-            groupByLabels = labelMatches.map(match => match.replace('=', ''));
-          }
+        // Extract labels from the query
+        const labelMatches = query.match(/(\w+)=/g);
+        if (labelMatches) {
+          groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
       }
 
@@ -774,25 +770,21 @@ export class LokiService {
       const startTimestamp = this.parseTimestamp(start);
       const endTimestamp = this.parseTimestamp(end);
 
-      // Determine which labels to group by based on targetLabels and aggregateBy
+      // Only use targetLabels for grouping if set
       let groupByLabels: string[] = [];
-
-      if (aggregateBy === 'labels') {
+      if (targetLabels) {
+        groupByLabels = targetLabels.split(',').map(label => label.trim());
+      } else if (aggregateBy === 'labels') {
         // For labels aggregation, we need to extract label names from the query
         const labelMatches = query.match(/(\w+)=/g);
         if (labelMatches) {
           groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
       } else {
-        // For series aggregation (default), use targetLabels or extract from query
-        if (targetLabels) {
-          groupByLabels = targetLabels.split(',').map(label => label.trim());
-        } else {
-          // Extract labels from the query
-          const labelMatches = query.match(/(\w+)=/g);
-          if (labelMatches) {
-            groupByLabels = labelMatches.map(match => match.replace('=', ''));
-          }
+        // Extract labels from the query
+        const labelMatches = query.match(/(\w+)=/g);
+        if (labelMatches) {
+          groupByLabels = labelMatches.map(match => match.replace('=', ''));
         }
       }
 
