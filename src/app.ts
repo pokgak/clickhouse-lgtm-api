@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { createClickHouseAdapter } from './clickhouse';
 import { LokiService } from './loki-service';
 import { DefaultLimits } from './limits';
+import { nowDateTime64, dateTime64HoursAgo } from './utils/date';
 
 const app = express();
 
@@ -134,8 +135,8 @@ app.get('/loki/api/v1/detected_labels', async (req, res) => {
   const { query, start, end } = req.query;
 
   // Use defaults if not provided (last 24 hours)
-  const startTime = start as string || (Date.now() - 24 * 60 * 60 * 1000).toString();
-  const endTime = end as string || Date.now().toString();
+  const startTime = (start as string) || dateTime64HoursAgo(24);
+  const endTime = (end as string) || nowDateTime64();
 
   const result = await lokiService.getDetectedLabels(
     query as string || '',
@@ -150,8 +151,8 @@ app.get('/loki/api/v1/detected_fields', async (req, res) => {
   const { query, start, end, values, name } = req.query;
 
   // Use defaults if not provided (last 24 hours)
-  const startTime = start as string || (Date.now() - 24 * 60 * 60 * 1000).toString();
-  const endTime = end as string || Date.now().toString();
+  const startTime = (start as string) || dateTime64HoursAgo(24);
+  const endTime = (end as string) || nowDateTime64();
 
   // Check if this is a values request
   if (values === 'true' && name) {
@@ -179,8 +180,8 @@ app.get('/loki/api/v1/detected_field/:name/values', async (req, res) => {
   const { name } = req.params;
 
   // Use defaults if not provided (last 24 hours)
-  const startTime = start as string || (Date.now() - 24 * 60 * 60 * 1000).toString();
-  const endTime = end as string || Date.now().toString();
+  const startTime = (start as string) || dateTime64HoursAgo(24);
+  const endTime = (end as string) || nowDateTime64();
 
   const result = await lokiService.getDetectedFieldValues(
     name,

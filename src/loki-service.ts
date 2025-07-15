@@ -19,6 +19,7 @@ import {
   QueryLimiter
 } from './types';
 import { DefaultLimits, LimitsMiddleware, QueryLimiterImpl, formatBytes } from './limits';
+import { nowDateTime64, dateTime64HoursAgo } from './utils/date';
 
 export class LokiService {
   private clickhouse: ClickHouseAdapter;
@@ -690,8 +691,8 @@ export class LokiService {
   async getDetectedFields(query?: string, start?: string, end?: string): Promise<DetectedFieldsResponse> {
     try {
       // Parse timestamps
-      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
-      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
+      const startTimestamp = start || dateTime64HoursAgo(24);
+      const endTimestamp = end || nowDateTime64();
 
       // Handle empty query - logs-drilldown expects empty string, not {}
       const processedQuery = query === '{}' ? '' : query;
@@ -943,8 +944,8 @@ export class LokiService {
   async getDetectedFieldValues(fieldName: string, query?: string, start?: string, end?: string): Promise<DetectedFieldsResponse> {
     try {
       // Parse timestamps
-      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
-      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
+      const startTimestamp = start || dateTime64HoursAgo(24);
+      const endTimestamp = end || nowDateTime64();
 
       // Build query to get log entries for field value extraction
       let sql = `
@@ -1067,8 +1068,8 @@ export class LokiService {
   async getDetectedLabels(query?: string, start?: string, end?: string): Promise<DetectedLabelsResponse> {
     try {
       // Parse timestamps (default: last 24h)
-      const startTimestamp = start ? this.parseTimestamp(start) : this.parseTimestamp((Date.now() - 24 * 60 * 60 * 1000).toString());
-      const endTimestamp = end ? this.parseTimestamp(end) : this.parseTimestamp(Date.now().toString());
+      const startTimestamp = start || dateTime64HoursAgo(24);
+      const endTimestamp = end || nowDateTime64();
 
       // Handle empty query - logs-drilldown expects empty string, not {}
       const processedQuery = query === '{}' ? '' : query;
