@@ -1,7 +1,7 @@
 {
   "name": "clickhouse-lgtm-adapter",
   "version": "1.0.0",
-      "description": "ClickHouse adapter that provides Loki-compatible API endpoints for querying OpenTelemetry logs",
+  "description": "ClickHouse adapter that provides Loki-compatible API endpoints for querying OpenTelemetry logs",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -11,26 +11,35 @@
     "lint": "eslint src/**/*.ts",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["clickhouse", "loki", "grafana", "tempo", "mimir", "api"],
+  "keywords": [
+    "clickhouse",
+    "loki",
+    "grafana",
+    "tempo",
+    "mimir",
+    "api"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "helmet": "^7.1.0",
-    "dotenv": "^16.3.1",
+    "@clickhouse/client": "^0.2.5",
     "axios": "^1.6.2",
-    "@clickhouse/client": "^0.2.5"
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "iconv-lite": "^0.6.3",
+    "playwright": "^1.54.1"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.8",
     "@types/node": "^20.17.6",
     "@typescript-eslint/eslint-plugin": "^6.13.2",
     "@typescript-eslint/parser": "^6.13.2",
     "eslint": "^8.55.0",
     "jest": "^29.7.0",
-    "@types/jest": "^29.5.8",
     "ts-jest": "^29.1.1",
     "tsx": "^4.6.2",
     "typescript": "^5.3.3"

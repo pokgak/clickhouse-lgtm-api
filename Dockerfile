@@ -13,7 +13,7 @@ COPY . .
 RUN npm run build
 
 # Remove dev dependencies to reduce image size
-RUN npm prune --production
+# RUN npm prune --production
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs

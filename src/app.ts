@@ -149,13 +149,17 @@ app.get('/loki/api/v1/tail', async (req, res) => {
     });
   }
 
-  // Set up Server-Sent Events headers
+  // Set up Server-Sent Events headers with additional CORS headers
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     'Connection': 'keep-alive',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control'
+    'Access-Control-Allow-Headers': 'Cache-Control, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Credentials': 'true'
   });
 
   // Send initial connection message
@@ -168,7 +172,25 @@ app.get('/loki/api/v1/tail', async (req, res) => {
     isConnected = false;
   });
 
-  // Poll for new logs every 2 seconds
+  // Send initial data immediately
+  try {
+    const initialResult = await lokiService.query(
+      query as string,
+      start as string,
+      limit ? parseInt(limit as string) : 10,
+      'forward'
+    );
+
+    if (initialResult.status === 'success' && initialResult.data.result.length > 0) {
+      res.write(`data: ${JSON.stringify(initialResult.data)}\n\n`);
+    }
+  } catch (error) {
+    console.error('Initial tail query error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.write(`data: {"error": "${errorMessage}"}\n\n`);
+  }
+
+  // Poll for new logs every 1 second (faster polling for better real-time feel)
   const pollInterval = setInterval(async () => {
     if (!isConnected) {
       clearInterval(pollInterval);
@@ -189,12 +211,21 @@ app.get('/loki/api/v1/tail', async (req, res) => {
       }
     } catch (error) {
       console.error('Tail endpoint error:', error);
-      res.write(`data: {"error": "${error instanceof Error ? error.message : 'Unknown error'}"}\n\n`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      res.write(`data: {"error": "${errorMessage}"}\n\n`);
+
+      // Close connection on error to prevent infinite error loops
+      if (isConnected) {
+        isConnected = false;
+        clearInterval(pollInterval);
+        res.end();
+      }
     }
-  }, 2000);
+  }, 1000);
 
   // Clean up on client disconnect
   req.on('close', () => {
+    isConnected = false;
     clearInterval(pollInterval);
   });
 });
