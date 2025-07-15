@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { createClickHouseAdapter } from './clickhouse';
 import { LokiService } from './loki-service';
+import { DefaultLimits } from './limits';
 
 const app = express();
 
@@ -19,7 +20,25 @@ const clickhouseConfig = {
 };
 
 const clickhouse = createClickHouseAdapter(clickhouseConfig);
-const lokiService = new LokiService(clickhouse, process.env.LOGS_TABLE || 'otel_logs');
+
+// Create limits configuration
+const limitsConfig = {
+  maxQuerySeries: process.env.MAX_QUERY_SERIES ? parseInt(process.env.MAX_QUERY_SERIES) : 500,
+  maxEntriesLimitPerQuery: process.env.MAX_ENTRIES_LIMIT_PER_QUERY ? parseInt(process.env.MAX_ENTRIES_LIMIT_PER_QUERY) : 1000,
+  maxQueryLookback: process.env.MAX_QUERY_LOOKBACK ? parseInt(process.env.MAX_QUERY_LOOKBACK) : 0,
+  maxQueryLength: process.env.MAX_QUERY_LENGTH ? parseInt(process.env.MAX_QUERY_LENGTH) : 0,
+  maxQueryParallelism: process.env.MAX_QUERY_PARALLELISM ? parseInt(process.env.MAX_QUERY_PARALLELISM) : 32,
+  maxQueryBytesRead: process.env.MAX_QUERY_BYTES_READ ? parseInt(process.env.MAX_QUERY_BYTES_READ) : 0,
+  maxQuerierBytesRead: process.env.MAX_QUERIER_BYTES_READ ? parseInt(process.env.MAX_QUERIER_BYTES_READ) : 150 * 1024 * 1024 * 1024, // 150GB default
+  requiredLabels: process.env.REQUIRED_LABELS ? process.env.REQUIRED_LABELS.split(',') : [],
+  requiredNumberLabels: process.env.REQUIRED_NUMBER_LABELS ? parseInt(process.env.REQUIRED_NUMBER_LABELS) : 0
+};
+
+const lokiService = new LokiService(clickhouse, process.env.LOGS_TABLE || 'otel_logs', {
+  patternPersistenceEnabled: process.env.PATTERN_PERSISTENCE_ENABLED !== 'false',
+  queryIngestersWithin: process.env.QUERY_INGESTERS_WITHIN ? parseInt(process.env.QUERY_INGESTERS_WITHIN) : undefined,
+  queryPatternIngestersWithin: process.env.QUERY_PATTERN_INGESTERS_WITHIN ? parseInt(process.env.QUERY_PATTERN_INGESTERS_WITHIN) : undefined
+}, new DefaultLimits(limitsConfig));
 
 app.get('/loki/api/v1/query', async (req, res) => {
   const { query, time, limit, direction } = req.query;
@@ -45,11 +64,16 @@ app.get('/loki/api/v1/query', async (req, res) => {
     });
   }
 
+  // Extract user ID from headers (for multi-tenancy support)
+  const userID = req.headers['x-scope-orgid'] as string || 'default';
+
   const result = await lokiService.query(
     query as string,
     time as string,
     limit ? parseInt(limit as string) : undefined,
-    direction as 'forward' | 'backward'
+    direction as 'forward' | 'backward',
+    req, // context
+    userID
   );
 
   res.json(result);
@@ -65,12 +89,17 @@ app.get('/loki/api/v1/query_range', async (req, res) => {
     });
   }
 
+  // Extract user ID from headers (for multi-tenancy support)
+  const userID = req.headers['x-scope-orgid'] as string || 'default';
+
   const result = await lokiService.queryRange(
     query as string,
     start as string,
     end as string,
     limit ? parseInt(limit as string) : undefined,
-    direction as 'forward' | 'backward'
+    direction as 'forward' | 'backward',
+    req, // context
+    userID
   );
 
   res.json(result);
@@ -104,52 +133,60 @@ app.get('/loki/api/v1/series', async (req, res) => {
 app.get('/loki/api/v1/detected_labels', async (req, res) => {
   const { query, start, end } = req.query;
 
-  // Validate required parameters
-  if (!start) {
-    return res.status(400).json({
-      status: 'error',
-      error: 'start parameter is required'
-    });
-  }
-
-  if (!end) {
-    return res.status(400).json({
-      status: 'error',
-      error: 'end parameter is required'
-    });
-  }
+  // Use defaults if not provided (last 24 hours)
+  const startTime = start as string || (Date.now() - 24 * 60 * 60 * 1000).toString();
+  const endTime = end as string || Date.now().toString();
 
   const result = await lokiService.getDetectedLabels(
-    query as string,
-    start as string,
-    end as string
+    query as string || '',
+    startTime,
+    endTime
   );
 
   res.json(result);
 });
 
 app.get('/loki/api/v1/detected_fields', async (req, res) => {
-  const { query, start, end } = req.query;
+  const { query, start, end, values, name } = req.query;
 
-  // Validate required parameters
-  if (!start) {
-    return res.status(400).json({
-      status: 'error',
-      error: 'start parameter is required'
-    });
-  }
+  // Use defaults if not provided (last 24 hours)
+  const startTime = start as string || (Date.now() - 24 * 60 * 60 * 1000).toString();
+  const endTime = end as string || Date.now().toString();
 
-  if (!end) {
-    return res.status(400).json({
-      status: 'error',
-      error: 'end parameter is required'
-    });
+  // Check if this is a values request
+  if (values === 'true' && name) {
+    const result = await lokiService.getDetectedFieldValues(
+      name as string,
+      query as string || '',
+      startTime,
+      endTime
+    );
+    res.json(result);
+    return;
   }
 
   const result = await lokiService.getDetectedFields(
-    query as string,
-    start as string,
-    end as string
+    query as string || '',
+    startTime,
+    endTime
+  );
+
+  res.json(result);
+});
+
+app.get('/loki/api/v1/detected_field/:name/values', async (req, res) => {
+  const { query, start, end } = req.query;
+  const { name } = req.params;
+
+  // Use defaults if not provided (last 24 hours)
+  const startTime = start as string || (Date.now() - 24 * 60 * 60 * 1000).toString();
+  const endTime = end as string || Date.now().toString();
+
+  const result = await lokiService.getDetectedFieldValues(
+    name,
+    query as string || '',
+    startTime,
+    endTime
   );
 
   res.json(result);

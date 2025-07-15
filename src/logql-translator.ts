@@ -149,20 +149,32 @@ export class LogQLTranslator {
   }
 
   private parseTimestamp(timestamp: string): string {
-    // Check if it's a Unix timestamp (numeric)
-    if (/^\d+$/.test(timestamp)) {
-      // Handle nanosecond timestamps from Grafana
-      if (timestamp.length > 13) {
-        // Convert nanoseconds to milliseconds
-        const ms = parseInt(timestamp.substring(0, 13));
-        return new Date(ms).toISOString().replace('Z', '');
-      } else {
-        // Regular Unix timestamp in seconds
-        return new Date(parseInt(timestamp) * 1000).toISOString().replace('Z', '');
-      }
+    // Handle nanosecond timestamps from Grafana
+    let date: Date;
+    if (timestamp.length > 13 && /^\d+$/.test(timestamp)) {
+      // Convert nanoseconds to milliseconds
+      const ms = parseInt(timestamp.substring(0, 13));
+      date = new Date(ms);
+    } else if (/^\d+$/.test(timestamp)) {
+      // Regular Unix timestamp in seconds
+      date = new Date(parseInt(timestamp) * 1000);
+    } else {
+      // Handle ISO timestamps
+      date = new Date(timestamp);
     }
-    // Handle ISO timestamps
-    return new Date(timestamp).toISOString().replace('Z', '');
+
+    // Format as 'YYYY-MM-DD HH:MM:SS.ssssss' for ClickHouse DateTime64
+    const pad = (n: number, z = 2) => n.toString().padStart(z, '0');
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hour = pad(date.getHours());
+    const min = pad(date.getMinutes());
+    const sec = pad(date.getSeconds());
+    const ms = date.getMilliseconds();
+    // Convert ms to microseconds (pad to 6 digits)
+    const micro = pad(ms, 3) + '000';
+    return `${year}-${month}-${day} ${hour}:${min}:${sec}.${micro}`;
   }
 
   translateLabelsQuery(): ClickHouseQuery {
